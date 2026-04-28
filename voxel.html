@@ -1,0 +1,1659 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>voxel POC</title>
+<style>
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background:
+      radial-gradient(ellipse at 50% 35%, #1a2848 0%, #0a0f20 55%, #02030a 100%);
+  }
+  body { font-family: system-ui, sans-serif; color: #cdd; }
+  canvas { display: block; cursor: crosshair; }
+  #hud {
+    position: fixed; top: 8px; left: 10px; font-size: 12px; opacity: 0.75;
+    pointer-events: none; line-height: 1.5;
+    text-shadow: 0 0 4px rgba(0,0,0,0.9);
+  }
+  kbd { background: rgba(255,255,255,0.12); padding: 1px 5px; border-radius: 3px;
+        font-family: ui-monospace, monospace; font-size: 11px; }
+  #click-to-play {
+    position: fixed; inset: 0; display: flex; align-items: center;
+    justify-content: center; background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(8px); cursor: pointer; font-size: 18px; letter-spacing: 2px;
+  }
+  #click-to-play.hidden { display: none; }
+
+  #dev-stats {
+    position: fixed; top: 8px; right: 12px;
+    background: rgba(15, 18, 28, 0.85);
+    border: 1px solid #333; border-radius: 6px;
+    padding: 8px 10px; min-width: 180px;
+    font: 12px/1.45 ui-monospace, monospace; color: #d4dcec;
+    z-index: 10; user-select: none;
+  }
+  #dev-stats h3 {
+    margin: 0 0 6px; font-size: 10px; letter-spacing: 1.5px;
+    text-transform: uppercase; opacity: 0.6;
+  }
+  #dev-stats .row {
+    display: grid; grid-template-columns: 32px 1fr 56px;
+    align-items: center; gap: 6px; margin: 3px 0;
+  }
+  #dev-stats .label { opacity: 0.7; }
+  #dev-stats .bar {
+    height: 8px; background: rgba(255,255,255,0.08); border-radius: 3px;
+    overflow: hidden;
+  }
+  #dev-stats .fill {
+    height: 100%; transition: width 80ms linear; border-radius: 3px;
+  }
+  #dev-stats .fill.cpu { background: linear-gradient(90deg, #5dd0a8, #f3c54e, #f25c54); }
+  #dev-stats .fill.gpu { background: linear-gradient(90deg, #6c9bff, #b87dff, #ff7dbb); }
+  #dev-stats .val { text-align: right; opacity: 0.85; font-variant-numeric: tabular-nums; }
+  #dev-stats.hidden { display: none; }
+
+  #open-settings {
+    position: fixed; bottom: 12px; right: 12px; z-index: 10;
+    background: rgba(20,20,28,0.85); color: #e2e8f4;
+    border: 1px solid #444; border-radius: 4px;
+    font: 11px ui-monospace, monospace; letter-spacing: 1px;
+    padding: 6px 12px; cursor: pointer;
+  }
+  #open-settings:hover { background: rgba(36,40,56,0.95); }
+
+  #settings-bg {
+    position: fixed; inset: 0; z-index: 20;
+    background: rgba(10,12,20,0.55);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    display: none; align-items: center; justify-content: center;
+  }
+  #settings-bg.open { display: flex; }
+  #settings {
+    background: rgba(24,24,30,0.95); color: #e0e4ef;
+    border: 1px solid #444; border-radius: 10px;
+    padding: 22px; min-width: 360px; max-width: 90vw; max-height: 90vh;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+    font: 13px/1.5 system-ui, sans-serif;
+  }
+  #settings h2 {
+    margin: 0 0 14px; font-size: 13px; letter-spacing: 1.5px;
+    text-transform: uppercase; opacity: 0.85;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  #settings .close {
+    cursor: pointer; opacity: 0.6; font-size: 18px; line-height: 1;
+  }
+  #settings .close:hover { opacity: 1; }
+  #settings .row {
+    display: flex; gap: 10px; align-items: center;
+    padding: 8px 0; border-top: 1px solid #2a2a32;
+  }
+  #settings .row:first-of-type { border-top: 0; }
+  #settings .row .label { flex: 1; opacity: 0.85; }
+  #settings .label .desc { opacity: 0.6; font-size: 11px; }
+  #settings input[type=number], #settings select {
+    background: #1a1a22; color: #ddd; border: 1px solid #444;
+    border-radius: 3px; padding: 3px 6px; font: inherit;
+  }
+  #settings button.action {
+    background: #2a2a32; color: #e2e8f4; border: 1px solid #555;
+    padding: 6px 14px; border-radius: 4px; cursor: pointer; font: inherit;
+  }
+  #settings button.action:hover { background: #3a3a44; }
+  #settings #map {
+    display: block; margin: 12px auto 0;
+    image-rendering: pixelated;
+    border: 1px solid #444; border-radius: 4px;
+    background: #000; cursor: crosshair;
+  }
+  #settings #map:hover { border-color: #888; }
+  #settings #map-meta { text-align: center; opacity: 0.6; font-size: 11px; margin-top: 6px; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="hud">
+  <div><kbd>WASD</kbd> fly &nbsp; <kbd>SCROLL</kbd> altitude &nbsp; <kbd>F</kbd> orbit &nbsp; <kbd>1/2/3</kbd> tool &nbsp; <kbd>CLICK</kbd> fire</div>
+  <div id="tool-hud"></div>
+  <div id="info"></div>
+  <div id="collected"></div>
+</div>
+<div id="click-to-play">click to enter</div>
+
+<button id="open-settings">⚙ Settings</button>
+
+<div id="settings-bg">
+  <div id="settings">
+    <h2>Settings <span class="close" id="close-settings">&times;</span></h2>
+    <div class="row">
+      <div class="label">
+        <div>Generate world</div>
+        <div class="desc">New seed and size. Resets the saucer position.</div>
+        <div style="margin-top:6px; display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+          <label>Seed
+            <input type="number" id="gen-seed" style="width:110px">
+          </label>
+          <label>Size
+            <select id="gen-size">
+              <option value="96">96 × 96</option>
+              <option value="128">128 × 128</option>
+              <option value="192" selected>192 × 192</option>
+              <option value="256">256 × 256</option>
+              <option value="384">384 × 384</option>
+            </select>
+          </label>
+          <label style="display:flex; align-items:center; gap:4px">
+            <input type="checkbox" id="gen-poles"> Polar ice caps
+          </label>
+        </div>
+      </div>
+      <button class="action" id="generate-world">Generate</button>
+    </div>
+    <div class="row">
+      <div class="label">
+        <div>World map</div>
+        <div class="desc" id="map-meta">– seed</div>
+      </div>
+    </div>
+    <canvas id="map" width="256" height="256"></canvas>
+  </div>
+</div>
+
+<div id="dev-stats">
+  <h3>Perf <span style="float:right; opacity:0.4">` toggle</span></h3>
+  <div class="row"><span class="label">FPS</span>
+    <div class="bar"><div class="fill cpu" id="fps-fill" style="width:0%"></div></div>
+    <span class="val" id="fps-val">— </span></div>
+  <div class="row"><span class="label">CPU</span>
+    <div class="bar"><div class="fill cpu" id="cpu-fill" style="width:0%"></div></div>
+    <span class="val" id="cpu-val">— ms</span></div>
+  <div class="row"><span class="label">GPU</span>
+    <div class="bar"><div class="fill gpu" id="gpu-fill" style="width:0%"></div></div>
+    <span class="val" id="gpu-val">— ms</span></div>
+  <div style="opacity:0.45; font-size:10px; margin-top:4px" id="dev-meta"></div>
+  <hr style="border:0; border-top:1px solid #2a2e3a; margin:8px 0">
+  <div style="opacity:0.7; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:4px">Inception</div>
+  <div class="row" style="grid-template-columns: 32px 1fr 56px">
+    <span class="label">Sph</span>
+    <input id="sph-slider" type="range" min="0" max="1" step="0.01" value="1"
+           style="width: 100%; accent-color: #b87dff">
+    <span class="val" id="sph-val">1.00</span>
+  </div>
+  <button id="sph-flip" style="margin-top:4px; width:100%; padding:5px; cursor:pointer;
+          background:#2a2032; color:#e8d4ff; border:1px solid #5a3a78;
+          border-radius:4px; font: 11px ui-monospace, monospace; letter-spacing:1px">
+    🔄 FLIP IT
+  </button>
+  <div style="opacity:0.7; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; margin:6px 0 4px">Camera</div>
+  <div class="row" style="grid-template-columns: 32px 1fr 56px">
+    <span class="label">Zoom</span>
+    <input id="zoom-slider" type="range" min="3" max="80" step="0.5" value="21"
+           style="width: 100%; accent-color: #6c9bff">
+    <span class="val" id="zoom-val">21</span>
+  </div>
+  <div class="row" style="grid-template-columns: 32px 1fr 56px">
+    <span class="label">Tilt</span>
+    <input id="tilt-slider" type="range" min="0" max="80" step="1" value="0"
+           style="width: 100%; accent-color: #f3c54e">
+    <span class="val" id="tilt-val">0°</span>
+  </div>
+</div>
+
+<script id="vsObject" type="x-shader/x-vertex">
+// Plain MVP shader for objects (UFO, etc.) — bypasses the sphere warp.
+attribute vec3 aPos;
+attribute vec3 aNorm;
+attribute vec3 aColor;
+uniform mat4 uViewProj;
+uniform mat4 uModel;
+uniform vec3 uTint;        // multiplies vertex color (1 = no tint)
+varying vec3 vNorm;
+varying vec3 vColor;
+varying vec3 vWorld;
+void main() {
+  vec4 wp = uModel * vec4(aPos, 1.0);
+  gl_Position = uViewProj * wp;
+  vNorm = mat3(uModel) * aNorm;
+  vColor = aColor * uTint;
+  vWorld = wp.xyz;
+}
+</script>
+
+<script id="vs" type="x-shader/x-vertex">
+// Voxel mesh warped onto a sphere in the vertex shader. The flat-grid mesh stays
+// in CPU memory; per-vertex we transform (gridX, voxelY, gridZ) to a position on
+// a planet of radius `uPlanetRadius`, with `uHeightScale` controlling how much
+// the column's voxel height pokes outward radially.
+attribute vec3 aPos;
+attribute vec3 aNorm;
+attribute vec3 aColor;
+uniform mat4 uViewProj;
+uniform vec2 uWorldSize;        // (W, D)
+uniform float uPlanetRadius;
+uniform float uHeightScale;
+uniform float uSphericity;      // 0 = flat, 1 = full sphere
+varying vec3 vNorm;
+varying vec3 vColor;
+varying vec3 vWorld;
+
+const float PI = 3.14159265;
+void main() {
+  // Map grid (X, Z) to (lon, lat) on the planet.
+  float lon = aPos.x / uWorldSize.x * 2.0 * PI;
+  float lat = aPos.z / uWorldSize.y * PI - PI * 0.5;
+  float cl = cos(lat), sl = sin(lat);
+  float co = cos(lon), so = sin(lon);
+  // Radial distance: planet surface + voxel height (scaled).
+  float r = uPlanetRadius + aPos.y * uHeightScale;
+  vec3 sphPos = vec3(r * cl * co, r * sl, r * cl * so);
+  // Flat fallback (centered on origin).
+  vec3 flatPos = vec3(aPos.x - uWorldSize.x * 0.5,
+                      aPos.y * uHeightScale,
+                      aPos.z - uWorldSize.y * 0.5);
+  vec3 worldPos = mix(flatPos, sphPos, uSphericity);
+  // Local tangent frame at (lon, lat) for normal warping.
+  vec3 up    = vec3(cl * co, sl, cl * so);
+  vec3 east  = vec3(-so, 0.0, co);
+  vec3 north = vec3(-sl * co, cl, -sl * so);
+  vec3 sphNorm = aNorm.x * east + aNorm.y * up + aNorm.z * north;
+  vNorm = normalize(mix(aNorm, sphNorm, uSphericity));
+  vColor = aColor;
+  vWorld = worldPos;
+  gl_Position = uViewProj * vec4(worldPos, 1.0);
+}
+</script>
+<script id="fs" type="x-shader/x-fragment">
+precision highp float;
+varying vec3 vNorm;
+varying vec3 vColor;
+varying vec3 vWorld;
+uniform vec3 uCamPos;
+
+float hash(vec3 p) {
+  p = fract(p * 0.3183099 + 0.1);
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+
+void main() {
+  vec3 N = normalize(vNorm);
+  vec3 V = normalize(uCamPos - vWorld);
+
+  // Three-point lighting. Warm key + cool sky fill + warm ground bounce.
+  vec3 sunDir   = normalize(vec3(0.55, 0.7, 0.45));
+  vec3 sunCol   = vec3(1.10, 0.96, 0.84);
+  vec3 skyCol   = vec3(0.55, 0.72, 0.92);
+  vec3 groundCol= vec3(0.55, 0.42, 0.30);
+
+  float ndl    = max(0.0, dot(N, sunDir));
+  float ndsky  = max(0.0,  dot(N, vec3(0.0,  1.0, 0.0)));
+  float ndgnd  = max(0.0,  dot(N, vec3(0.0, -1.0, 0.0)));
+
+  vec3 ambient = vec3(0.16, 0.18, 0.24);
+  vec3 lit = vColor *
+      ( ambient
+      + sunCol    * ndl   * 0.95
+      + skyCol    * ndsky * 0.30
+      + groundCol * ndgnd * 0.18 );
+
+  // Subtle per-voxel color variation breaks up flat solid blocks.
+  float jitter = (hash(floor(vWorld * 1.7)) - 0.5) * 0.18;
+  lit *= 1.0 + jitter;
+
+  // Soft specular only on top faces — reads as sheen on grass/snow.
+  float ndsky2 = max(0.0, dot(N, vec3(0.0, 1.0, 0.0)));
+  vec3 H = normalize(sunDir + V);
+  float spec = pow(max(0.0, dot(N, H)), 28.0) * ndsky2 * 0.35;
+  lit += vec3(1.0, 0.95, 0.85) * spec;
+
+  // Fresnel rim — atmosphere glow at the planet's silhouette from the camera.
+  float rim = pow(1.0 - max(0.0, dot(V, N)), 3.5);
+  vec3 atmosphere = vec3(0.55, 0.78, 1.05);
+  lit = mix(lit, lit + atmosphere * 0.55, rim);
+
+  // Exponential-squared distance fog that fades to the same atmosphere tint,
+  // so distant terrain blends into the sky rather than ending in a hard edge.
+  float dist = length(vWorld - uCamPos);
+  float fogAmt = 1.0 - exp(-pow(dist * 0.011, 2.0));
+  vec3 fogCol = mix(vec3(0.36, 0.50, 0.72), atmosphere, 0.4);
+  lit = mix(lit, fogCol, fogAmt * 0.85);
+
+  gl_FragColor = vec4(lit, 1.0);
+}
+</script>
+
+<script>
+(() => {
+  const canvas = document.getElementById('gl');
+  const gl = canvas.getContext('webgl', { antialias: true, alpha: true, premultipliedAlpha: false });
+  if (!gl) { document.body.innerText = 'WebGL not supported.'; return; }
+  function resize() {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+  }
+  addEventListener('resize', resize);
+  resize();
+
+  // ---------- mat4 helpers (column-major, like OpenGL) ----------
+  function mat4Identity() {
+    const m = new Float32Array(16); m[0]=m[5]=m[10]=m[15]=1; return m;
+  }
+  function mat4Multiply(a, b) {
+    const r = new Float32Array(16);
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+      let s = 0;
+      for (let k = 0; k < 4; k++) s += a[k * 4 + j] * b[i * 4 + k];
+      r[i * 4 + j] = s;
+    }
+    return r;
+  }
+  function mat4Perspective(fovY, aspect, near, far) {
+    const f = 1 / Math.tan(fovY / 2);
+    const nf = 1 / (near - far);
+    const m = new Float32Array(16);
+    m[0] = f / aspect; m[5] = f;
+    m[10] = (far + near) * nf;
+    m[11] = -1;
+    m[14] = 2 * far * near * nf;
+    return m;
+  }
+  // Standard 4×4 column-major inverse — used to unproject screen-space mouse
+  // coordinates back into world rays for picking.
+  function mat4Invert(a) {
+    const out = new Float32Array(16);
+    const a00 = a[0],  a01 = a[1],  a02 = a[2],  a03 = a[3];
+    const a10 = a[4],  a11 = a[5],  a12 = a[6],  a13 = a[7];
+    const a20 = a[8],  a21 = a[9],  a22 = a[10], a23 = a[11];
+    const a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+    const b00 = a00*a11 - a01*a10, b01 = a00*a12 - a02*a10, b02 = a00*a13 - a03*a10;
+    const b03 = a01*a12 - a02*a11, b04 = a01*a13 - a03*a11, b05 = a02*a13 - a03*a12;
+    const b06 = a20*a31 - a21*a30, b07 = a20*a32 - a22*a30, b08 = a20*a33 - a23*a30;
+    const b09 = a21*a32 - a22*a31, b10 = a21*a33 - a23*a31, b11 = a22*a33 - a23*a32;
+    let det = b00*b11 - b01*b10 + b02*b09 + b03*b08 - b04*b07 + b05*b06;
+    if (!det) return null;
+    det = 1 / det;
+    out[0]  = (a11*b11 - a12*b10 + a13*b09) * det;
+    out[1]  = (a02*b10 - a01*b11 - a03*b09) * det;
+    out[2]  = (a31*b05 - a32*b04 + a33*b03) * det;
+    out[3]  = (a22*b04 - a21*b05 - a23*b03) * det;
+    out[4]  = (a12*b08 - a10*b11 - a13*b07) * det;
+    out[5]  = (a00*b11 - a02*b08 + a03*b07) * det;
+    out[6]  = (a32*b02 - a30*b05 - a33*b01) * det;
+    out[7]  = (a20*b05 - a22*b02 + a23*b01) * det;
+    out[8]  = (a10*b10 - a11*b08 + a13*b06) * det;
+    out[9]  = (a01*b08 - a00*b10 - a03*b06) * det;
+    out[10] = (a30*b04 - a31*b02 + a33*b00) * det;
+    out[11] = (a21*b02 - a20*b04 - a23*b00) * det;
+    out[12] = (a11*b07 - a10*b09 - a12*b06) * det;
+    out[13] = (a00*b09 - a01*b07 + a02*b06) * det;
+    out[14] = (a31*b01 - a30*b03 - a32*b00) * det;
+    out[15] = (a20*b03 - a21*b01 + a22*b00) * det;
+    return out;
+  }
+  function mat4LookAt(eye, target, up) {
+    const fx = target[0] - eye[0], fy = target[1] - eye[1], fz = target[2] - eye[2];
+    const fl = Math.hypot(fx, fy, fz);
+    const fxn = fx / fl, fyn = fy / fl, fzn = fz / fl;
+    // s = normalize(f × up)
+    let sx = fyn * up[2] - fzn * up[1];
+    let sy = fzn * up[0] - fxn * up[2];
+    let sz = fxn * up[1] - fyn * up[0];
+    const sl = Math.hypot(sx, sy, sz);
+    sx /= sl; sy /= sl; sz /= sl;
+    // u = s × f
+    const ux = sy * fzn - sz * fyn;
+    const uy = sz * fxn - sx * fzn;
+    const uz = sx * fyn - sy * fxn;
+    const m = new Float32Array(16);
+    m[0]=sx; m[4]=sy; m[8]=sz;  m[12]=-(sx*eye[0]+sy*eye[1]+sz*eye[2]);
+    m[1]=ux; m[5]=uy; m[9]=uz;  m[13]=-(ux*eye[0]+uy*eye[1]+uz*eye[2]);
+    m[2]=-fxn;m[6]=-fyn;m[10]=-fzn;m[14]= (fxn*eye[0]+fyn*eye[1]+fzn*eye[2]);
+    m[15]=1;
+    return m;
+  }
+
+  // ---------- shaders ----------
+  function compile(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      console.error(gl.getShaderInfoLog(s)); throw new Error('shader');
+    }
+    return s;
+  }
+  function link(vsId) {
+    const v = compile(gl.VERTEX_SHADER, document.getElementById(vsId).textContent);
+    const f = compile(gl.FRAGMENT_SHADER, document.getElementById('fs').textContent);
+    const p = gl.createProgram();
+    gl.attachShader(p, v); gl.attachShader(p, f); gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    return p;
+  }
+  const program    = link('vs');
+  const progObject = link('vsObject');
+
+  const aPos   = gl.getAttribLocation(program, 'aPos');
+  const aNorm  = gl.getAttribLocation(program, 'aNorm');
+  const aColor = gl.getAttribLocation(program, 'aColor');
+  const uViewProj      = gl.getUniformLocation(program, 'uViewProj');
+  const uCamPos        = gl.getUniformLocation(program, 'uCamPos');
+  const uWorldSize     = gl.getUniformLocation(program, 'uWorldSize');
+  const uPlanetRadius  = gl.getUniformLocation(program, 'uPlanetRadius');
+  const uHeightScale   = gl.getUniformLocation(program, 'uHeightScale');
+  const uSphericity    = gl.getUniformLocation(program, 'uSphericity');
+
+  // Locations for the object program (UFO).
+  const oPos      = gl.getAttribLocation(progObject, 'aPos');
+  const oNorm     = gl.getAttribLocation(progObject, 'aNorm');
+  const oColor    = gl.getAttribLocation(progObject, 'aColor');
+  const oViewProj = gl.getUniformLocation(progObject, 'uViewProj');
+  const oCamPos   = gl.getUniformLocation(progObject, 'uCamPos');
+  const oModel    = gl.getUniformLocation(progObject, 'uModel');
+  const oTint     = gl.getUniformLocation(progObject, 'uTint');
+
+  // ---------- world generation (multi-octave biome noise, ported from globe) ----------
+  const H_MAX = 32;
+  const DEPTH = 24;        // subterranean voxel layers (dirt → stone → magma)
+  let W = 192, D = 192;
+  let _seed = 1337;
+  function rand() {
+    _seed |= 0; _seed = _seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(_seed ^ _seed >>> 15, 1 | _seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  }
+  function makeNoise(w, d, scale) {
+    const gw = Math.max(1, Math.round(w / scale));
+    const gd = Math.max(1, Math.round(d / scale));
+    const grid = new Float32Array(gw * gd);
+    for (let i = 0; i < grid.length; i++) grid[i] = rand();
+    const out = new Float32Array(w * d);
+    const sm = t => t * t * (3 - 2 * t);
+    for (let z = 0; z < d; z++) {
+      const gz = z * gd / d;
+      const z0 = Math.floor(gz), z1 = (z0 + 1) % gd;
+      const tz = sm(gz - z0);
+      for (let x = 0; x < w; x++) {
+        const gx = x * gw / w;
+        const x0 = Math.floor(gx), x1 = (x0 + 1) % gw;
+        const tx = sm(gx - x0);
+        const a = grid[z0 * gw + x0], b = grid[z0 * gw + x1];
+        const c = grid[z1 * gw + x0], dd = grid[z1 * gw + x1];
+        const ab = a + (b - a) * tx;
+        const cd = c + (dd - c) * tx;
+        out[z * w + x] = ab + (cd - ab) * tz;
+      }
+    }
+    return out;
+  }
+  let elev, moist, heights;
+  let SEED = 1337;
+  let polesEnabled = false;
+  function regenerateWorld(seedV, sizeV, addPoles) {
+    SEED = seedV | 0;
+    W = sizeV; D = sizeV;
+    polesEnabled = !!addPoles;
+    _seed = SEED;
+    const k = W / 1024;
+    const e1 = makeNoise(W, D, 96 * k);
+    const e2 = makeNoise(W, D, 32 * k);
+    const e3 = makeNoise(W, D, 12 * k);
+    elev  = new Float32Array(W * D);
+    moist = new Float32Array(W * D);
+    for (let i = 0; i < W * D; i++) {
+      elev[i]  = e1[i] * 0.6 + e2[i] * 0.3 + e3[i] * 0.1;
+      moist[i] = e2[i] * 0.5 + e3[i] * 0.5;
+    }
+    // Polar ice caps: blend each tile's elev toward snow-biome at extreme
+    // latitudes. The bias kicks in over the top/bottom ~35% of latitudes and
+    // ramps to full snow at the actual pole.
+    if (polesEnabled) {
+      for (let tz = 0; tz < D; tz++) {
+        const lat = (tz / D - 0.5) * Math.PI;            // -π/2 .. π/2
+        const polarity = Math.abs(lat) / (Math.PI / 2);  // 0 equator → 1 pole
+        const cold = Math.max(0, (polarity - 0.65) / 0.35);
+        const cold2 = cold * cold;                        // ease in
+        if (cold2 > 0) {
+          for (let tx = 0; tx < W; tx++) {
+            const i = tz * W + tx;
+            elev[i] = elev[i] * (1 - cold2) + 0.92 * cold2;
+            moist[i] = Math.max(moist[i], 0.6);            // keep snow color cool
+          }
+        }
+      }
+    }
+    heights = new Int8Array(W * D);
+    for (let i = 0; i < W * D; i++) {
+      const e = elev[i];
+      let h;
+      if (e < 0.35)      h = 1;
+      else if (e < 0.42) h = 2;
+      else if (e < 0.46) h = 3;
+      else if (e < 0.70) h = Math.round(4 + (e - 0.46) * 26);
+      else if (e < 0.82) h = Math.round(11 + (e - 0.70) * 55);
+      else               h = Math.round(18 + (e - 0.82) * 70);
+      heights[i] = Math.max(1, Math.min(H_MAX - 1, h));
+    }
+  }
+  regenerateWorld(SEED, W, false);
+
+  function heightAt(x, z) {
+    if (x < 0 || z < 0 || x >= W || z >= D) return -1;
+    return heights[z * W + x];
+  }
+  function biomeColor(e, m) {
+    if (e < 0.35) return [0.07, 0.16, 0.38];
+    if (e < 0.42) return [0.18, 0.40, 0.68];
+    if (e < 0.46) return [0.86, 0.78, 0.55];
+    if (e < 0.70) return m < 0.45 ? [0.55, 0.67, 0.31] : [0.27, 0.51, 0.24];
+    if (e < 0.82) return [0.35, 0.31, 0.24];
+    return [0.92, 0.93, 0.96];
+  }
+  // Sparse map of per-column deposit stacks: tile-index → array of [r,g,b].
+  // Each entry is a voxel that was *dropped* on top of that column (by tractor
+  // release, spew, or future tools). They sit above the procedural surface,
+  // bottom-of-array = lowest deposited voxel, top = newest.
+  const deposits = Object.create(null);
+
+  function blockColor(x, y, z) {
+    const i = z * W + x;
+    const h = heights[i];
+    const dep = deposits[i];
+    const depCount = dep ? dep.length : 0;
+    // Deposited voxels live above the original procedural surface.
+    if (depCount > 0) {
+      const origH = h - depCount;
+      if (y >= origH && y < h) return dep[y - origH];
+    }
+    const origTop = (h - depCount) - 1;
+    if (y === origTop) return biomeColor(elev[i], moist[i]);
+    const depth = origTop - y;
+    if (depth <= 2)     return [0.46, 0.32, 0.20];   // dirt
+    if (depth <= 8)     return [0.50, 0.50, 0.52];   // stone
+    if (depth <= 16)    return [0.32, 0.32, 0.36];   // deep stone
+    if (y > -DEPTH + 4) return [0.20, 0.20, 0.24];   // bedrock
+    return [0.95, 0.42, 0.10];                       // magma core
+  }
+
+  // ---------- mesh build (face culling) ----------
+  // Each face: [normal, 4 corner offsets] with CCW winding from outside.
+  const FACES = [
+    { n: [ 1, 0, 0], v: [[1,1,0],[1,1,1],[1,0,1],[1,0,0]] }, // +X
+    { n: [-1, 0, 0], v: [[0,1,1],[0,1,0],[0,0,0],[0,0,1]] }, // -X
+    { n: [ 0, 1, 0], v: [[0,1,1],[1,1,1],[1,1,0],[0,1,0]] }, // +Y (top)
+    { n: [ 0,-1, 0], v: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]] }, // -Y (bottom)
+    { n: [ 0, 0, 1], v: [[1,1,1],[0,1,1],[0,0,1],[1,0,1]] }, // +Z
+    { n: [ 0, 0,-1], v: [[0,1,0],[1,1,0],[1,0,0],[0,0,0]] }, // -Z
+  ];
+
+  let verts = [], indices = [];
+  function pushFace(x, y, z, face, color) {
+    const base = verts.length / 9;
+    for (const v of face.v) {
+      verts.push(x + v[0], y + v[1], z + v[2],
+                 face.n[0], face.n[1], face.n[2],
+                 color[0], color[1], color[2]);
+    }
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  function buildPlanetMesh() {
+    verts = []; indices = [];
+    for (let z = 0; z < D; z++) {
+      for (let x = 0; x < W; x++) {
+        const h = heights[z * W + x];
+        if (h <= -DEPTH) continue;           // column fully drilled out — magma exposed but no top
+        const topY = h - 1;
+        pushFace(x, topY, z, FACES[2], blockColor(x, topY, z));
+        // Side walls extend from the column's top down to whichever is lower:
+        // -DEPTH (subterranean limit) or each neighbor's top (so cliffs that
+        // result from digging expose the strata).
+        const hN = heightAt(x, z - 1);
+        const hS = heightAt(x, z + 1);
+        const hE = heightAt(x + 1, z);
+        const hW = heightAt(x - 1, z);
+        for (let y = topY; y >= -DEPTH; y--) {
+          if (y >= hE) pushFace(x, y, z, FACES[0], blockColor(x, y, z));
+          if (y >= hW) pushFace(x, y, z, FACES[1], blockColor(x, y, z));
+          if (y >= hS) pushFace(x, y, z, FACES[4], blockColor(x, y, z));
+          if (y >= hN) pushFace(x, y, z, FACES[5], blockColor(x, y, z));
+        }
+        // If we drilled below the bedrock, render a glowing magma floor.
+        if (h <= -DEPTH + 1) {
+          pushFace(x, -DEPTH, z, FACES[2], [0.95, 0.42, 0.10]);
+        }
+      }
+    }
+  }
+  buildPlanetMesh();
+
+  document.getElementById('info').textContent =
+    `${W}×${D} world, ${heights.length.toLocaleString()} columns, ` +
+    `${(indices.length / 3).toLocaleString()} triangles`;
+
+  // Upload planet mesh.
+  const vboPos = gl.createBuffer();
+  const ibo = gl.createBuffer();
+  const STRIDE = 9 * 4;
+  const indexExt = gl.getExtension('OES_element_index_uint');
+  const idxType = indexExt ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
+  let indexCount = 0;
+  function uploadPlanetMesh() {
+    gl.bindBuffer(gl.ARRAY_BUFFER, vboPos);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+    const idxArr = indexExt
+      ? new Uint32Array(indices)
+      : new Uint16Array(indices.slice(0, 65535));
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idxArr, gl.STATIC_DRAW);
+    indexCount = idxArr.length;
+  }
+  uploadPlanetMesh();
+
+  // ---------- UFO mesh (procedural saucer + glass dome) ----------
+  function buildUfo() {
+    const sides = 16;
+    const r = 0.7, bodyH = 0.10, domeR = 0.32, domeH = 0.26;
+    const greyA = [0.62, 0.66, 0.74];
+    const greyB = [0.38, 0.40, 0.46];
+    const dome  = [0.55, 0.78, 1.00];
+    const v = [], idx = [];
+    function pushV(x, y, z, nx, ny, nz, cr, cg, cb) {
+      v.push(x, y, z, nx, ny, nz, cr, cg, cb);
+    }
+    // Top body disc.
+    let off = v.length / 9;
+    pushV(0, bodyH, 0, 0, 1, 0, ...greyA);
+    for (let i = 0; i < sides; i++) {
+      const a = (i / sides) * Math.PI * 2;
+      pushV(Math.cos(a) * r, bodyH, Math.sin(a) * r, 0, 1, 0, ...greyA);
+    }
+    for (let i = 0; i < sides; i++)
+      idx.push(off, off + 1 + i, off + 1 + ((i + 1) % sides));
+    // Bottom body disc.
+    off = v.length / 9;
+    pushV(0, -bodyH, 0, 0, -1, 0, ...greyB);
+    for (let i = 0; i < sides; i++) {
+      const a = (i / sides) * Math.PI * 2;
+      pushV(Math.cos(a) * r, -bodyH, Math.sin(a) * r, 0, -1, 0, ...greyB);
+    }
+    for (let i = 0; i < sides; i++)
+      idx.push(off, off + 1 + ((i + 1) % sides), off + 1 + i);
+    // Side rim.
+    off = v.length / 9;
+    for (let i = 0; i < sides; i++) {
+      const a = (i / sides) * Math.PI * 2;
+      const nx = Math.cos(a), nz = Math.sin(a);
+      pushV(nx * r,  bodyH, nz * r, nx, 0, nz, ...greyA);
+      pushV(nx * r, -bodyH, nz * r, nx, 0, nz, ...greyA);
+    }
+    for (let i = 0; i < sides; i++) {
+      const a = off + i * 2;
+      const b = off + ((i + 1) % sides) * 2;
+      idx.push(a, a + 1, b + 1, a, b + 1, b);
+    }
+    // Half-sphere dome on top.
+    off = v.length / 9;
+    const stacks = 6;
+    for (let s = 0; s <= stacks; s++) {
+      const lat = (s / stacks) * (Math.PI / 2);
+      const y = bodyH + Math.sin(lat) * domeH;
+      const rr = Math.cos(lat) * domeR;
+      for (let i = 0; i < sides; i++) {
+        const a = (i / sides) * Math.PI * 2;
+        const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
+        const nx = Math.cos(a) * Math.cos(lat);
+        const ny = Math.sin(lat);
+        const nz = Math.sin(a) * Math.cos(lat);
+        pushV(x, y, z, nx, ny, nz, ...dome);
+      }
+    }
+    for (let s = 0; s < stacks; s++) {
+      for (let i = 0; i < sides; i++) {
+        const a = off + s * sides + i;
+        const b = off + s * sides + ((i + 1) % sides);
+        const c = off + (s + 1) * sides + i;
+        const d = off + (s + 1) * sides + ((i + 1) % sides);
+        idx.push(a, c, d, a, d, b);
+      }
+    }
+    return { v, idx };
+  }
+  const ufoMesh = buildUfo();
+  const ufoVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, ufoVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(ufoMesh.v), gl.STATIC_DRAW);
+  const ufoIbo = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ufoIbo);
+  const ufoIdx = indexExt
+    ? new Uint32Array(ufoMesh.idx)
+    : new Uint16Array(ufoMesh.idx);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, ufoIdx, gl.STATIC_DRAW);
+  const ufoIdxCount = ufoIdx.length;
+
+  // Saucer shadow — flat dark disc that sits on the ground beneath the UFO.
+  // Built once; positioned each frame via the model matrix.
+  function buildShadow() {
+    const sides = 24;
+    const r = 0.7;
+    const v = [], idx = [];
+    v.push(0, 0.02, 0,  0, 1, 0,  0, 0, 0);
+    for (let i = 0; i < sides; i++) {
+      const a = (i / sides) * Math.PI * 2;
+      v.push(Math.cos(a) * r, 0.02, Math.sin(a) * r,  0, 1, 0,  0.04, 0.04, 0.06);
+    }
+    for (let i = 0; i < sides; i++)
+      idx.push(0, 1 + i, 1 + ((i + 1) % sides));
+    return { v, idx };
+  }
+  const shadowMesh = buildShadow();
+  const shadowVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, shadowVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(shadowMesh.v), gl.STATIC_DRAW);
+  const shadowIbo = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, shadowIbo);
+  const shadowIdxArr = indexExt
+    ? new Uint32Array(shadowMesh.idx)
+    : new Uint16Array(shadowMesh.idx);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, shadowIdxArr, gl.STATIC_DRAW);
+  const shadowIdxCount = shadowIdxArr.length;
+
+  // UFO state — position over the planet (lat, lon, ABSOLUTE altitude above the
+  // planet's base radius in world units), plus a heading angle (rotation around
+  // its local up axis). Absolute altitude means the saucer doesn't sink when
+  // the terrain underneath it gets dug away.
+  const ufo = { lat: 0.55, lon: 0, alt: 8, heading: 0 };
+
+  // Tools — left-click (or hold the matching letter key) to engage the active
+  // tool. Number keys 1/2/3 switch.
+  //   1 / B = tractor   (pulls voxels into the saucer)
+  //   2 / V = spew      (retractor — dumps collected voxels back out)
+  //   3 / X = laser     (red destroy beam — fires not yet implemented)
+  let currentTool = 'tractor';
+  let beaming = false, retracting = false, lasering = false;
+  let mouseEngaged = false;
+  let beamTickTimer = 0;
+  let retractTickTimer = 0;
+  let laserTickTimer = 0;
+  let needsRebuild = false;
+  let rebuildTimer = 0;
+  let prevTractor = false;
+  const collectedStack = [];
+  const particles = [];
+  addEventListener('keydown', e => {
+    if (e.target && /input|select|textarea/i.test(e.target.tagName)) return;
+    const k = e.key.toLowerCase();
+    if (k === 'b') beaming = true;
+    if (k === 'v') retracting = true;
+    if (k === 'x') lasering = true;
+    if (e.key === '1') currentTool = 'tractor';
+    if (e.key === '2') currentTool = 'spew';
+    if (e.key === '3') currentTool = 'laser';
+  });
+  addEventListener('keyup', e => {
+    const k = e.key.toLowerCase();
+    if (k === 'b') beaming = false;
+    if (k === 'v') retracting = false;
+    if (k === 'x') lasering = false;
+  });
+  // Left-click engages the active tool. Right-click stays for camera orbit.
+  canvas.addEventListener('mousedown', e => { if (e.button === 0) mouseEngaged = true; });
+  addEventListener('mouseup',           e => { if (e.button === 0) mouseEngaged = false; });
+
+  // Track mouse position so tools can aim where the cursor is on the planet.
+  let mouseX = canvas.width / 2, mouseY = canvas.height / 2;
+  addEventListener('mousemove', e => {
+    const r = canvas.getBoundingClientRect();
+    mouseX = e.clientX - r.left;
+    mouseY = e.clientY - r.top;
+  });
+  // Beam target world position — recomputed each frame from the mouse cursor's
+  // ray intersected with a sphere just above the planet surface. null when
+  // the cursor is over space.
+  let beamTarget = null;
+
+  // Tiny voxel cube for particles. White vertex color; uTint colors per-particle.
+  function buildParticleCube() {
+    const s = 0.45;
+    const v = [], idx = [];
+    const faces = [
+      { n: [ 1, 0, 0], v: [[ s, s,-s],[ s, s, s],[ s,-s, s],[ s,-s,-s]] },
+      { n: [-1, 0, 0], v: [[-s, s, s],[-s, s,-s],[-s,-s,-s],[-s,-s, s]] },
+      { n: [ 0, 1, 0], v: [[-s, s, s],[ s, s, s],[ s, s,-s],[-s, s,-s]] },
+      { n: [ 0,-1, 0], v: [[-s,-s,-s],[ s,-s,-s],[ s,-s, s],[-s,-s, s]] },
+      { n: [ 0, 0, 1], v: [[ s, s, s],[-s, s, s],[-s,-s, s],[ s,-s, s]] },
+      { n: [ 0, 0,-1], v: [[-s, s,-s],[ s, s,-s],[ s,-s,-s],[-s,-s,-s]] },
+    ];
+    for (const f of faces) {
+      const off = v.length / 9;
+      for (const vv of f.v) v.push(vv[0], vv[1], vv[2], f.n[0], f.n[1], f.n[2], 1, 1, 1);
+      idx.push(off, off+1, off+2, off, off+2, off+3);
+    }
+    return { v, idx };
+  }
+  // Tractor beam cone — translucent-looking green, points downward in local Y.
+  function buildBeamCone() {
+    const sides = 16;
+    const v = [], idx = [];
+    for (let i = 0; i < sides; i++) {
+      const a = (i / sides) * Math.PI * 2;
+      const cx = Math.cos(a), cz = Math.sin(a);
+      // top (at saucer body)
+      v.push(cx * 0.45, 0, cz * 0.45, cx, 0, cz, 0.55, 1.10, 0.65);
+      // bottom (at ground)
+      v.push(cx * 0.75, -1, cz * 0.75, cx, 0, cz, 0.30, 0.95, 0.45);
+    }
+    for (let i = 0; i < sides; i++) {
+      const a = i * 2;
+      const b = ((i + 1) % sides) * 2;
+      idx.push(a, b, b + 1, a, b + 1, a + 1);
+    }
+    return { v, idx };
+  }
+  const beamMesh = buildBeamCone();
+  const beamVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, beamVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(beamMesh.v), gl.STATIC_DRAW);
+  const beamIbo = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, beamIbo);
+  const beamIdxArr = indexExt ? new Uint32Array(beamMesh.idx) : new Uint16Array(beamMesh.idx);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, beamIdxArr, gl.STATIC_DRAW);
+  const beamIdxCount = beamIdxArr.length;
+
+  const pCube = buildParticleCube();
+  const pVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, pVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pCube.v), gl.STATIC_DRAW);
+  const pIbo = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, pIbo);
+  const pIdxArr = indexExt ? new Uint32Array(pCube.idx) : new Uint16Array(pCube.idx);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, pIdxArr, gl.STATIC_DRAW);
+  const pIdxCount = pIdxArr.length;
+
+  gl.enable(gl.DEPTH_TEST);
+  gl.enable(gl.CULL_FACE);
+  gl.cullFace(gl.BACK);
+  // Transparent clear so the CSS sky gradient behind the canvas reads through.
+  gl.clearColor(0, 0, 0, 0);
+
+  // ---------- planet + orbit camera ----------
+  // Wrap the W×D heightmap as longitude×latitude on a sphere of this radius.
+  // Voxel heights protrude radially, scaled so mountains read as bumps not horns.
+  const PLANET_R = W / (2 * Math.PI);              // matches one wrap of longitude
+  const HEIGHT_SCALE = 0.18;
+  // mode: 'top'   = camera straight above the saucer, north points up on screen.
+  //       'orbit' = camera orbits the saucer; drag / arrows to spin around.
+  // tilt:  0 = pure top-down. Higher tilts swing the camera back behind the
+  //        saucer so the view feels 3/4 isometric — adjustable via dev slider.
+  const cam = { yaw: 0, pitch: 0.35, dist: PLANET_R * 0.7, mode: 'top', tilt: 0 };
+  addEventListener('keydown', e => {
+    if (e.key.toLowerCase() === 'f') {
+      cam.mode = cam.mode === 'top' ? 'orbit' : 'top';
+    }
+  });
+
+  const keys = new Set();
+  addEventListener('keydown', e => keys.add(e.key.toLowerCase()));
+  addEventListener('keyup',   e => keys.delete(e.key.toLowerCase()));
+  // Scroll changes the saucer's absolute altitude above the planet's base
+  // radius. Range covers below sea level (1.0) up to high orbit (80).
+  addEventListener('wheel', e => {
+    ufo.alt = Math.max(1.0, Math.min(80, ufo.alt * Math.exp(e.deltaY * 0.0014)));
+    e.preventDefault();
+  }, { passive: false });
+
+  // Click-and-drag to orbit the planet.
+  let dragging = false, dragX = 0, dragY = 0;
+  canvas.addEventListener('mousedown', e => { dragging = true; dragX = e.clientX; dragY = e.clientY; });
+  addEventListener('mouseup',   () => { dragging = false; });
+  addEventListener('mousemove', e => {
+    if (!dragging) return;
+    cam.yaw   -= (e.clientX - dragX) * 0.005;
+    cam.pitch += (e.clientY - dragY) * 0.005;
+    cam.pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, cam.pitch));
+    dragX = e.clientX; dragY = e.clientY;
+  });
+
+  document.getElementById('click-to-play').classList.add('hidden');
+
+  // ---------- settings dialog ----------
+  const settingsBg = document.getElementById('settings-bg');
+  const mapCanvas  = document.getElementById('map');
+  const mapCtx     = mapCanvas.getContext('2d');
+  const mapMeta    = document.getElementById('map-meta');
+
+  function renderMap() {
+    const Wm = mapCanvas.width, Hm = mapCanvas.height;
+    const img = mapCtx.createImageData(Wm, Hm);
+    const buf = new Uint32Array(img.data.buffer);
+    for (let y = 0; y < Hm; y++) {
+      const tz = Math.floor(y * D / Hm);
+      for (let x = 0; x < Wm; x++) {
+        const tx = Math.floor(x * W / Wm);
+        const i = tz * W + tx;
+        const e = elev[i], m = moist[i];
+        let r, g, b;
+        if (e < 0.35)      { r = 30;  g = 60;  b = 120; }
+        else if (e < 0.42) { r = 50;  g = 100; b = 170; }
+        else if (e < 0.46) { r = 220; g = 200; b = 140; }
+        else if (e < 0.70) {
+          if (m < 0.45)    { r = 140; g = 170; b = 80;  }
+          else             { r = 70;  g = 130; b = 60;  }
+        }
+        else if (e < 0.82) { r = 90;  g = 80;  b = 60;  }
+        else               { r = 220; g = 220; b = 230; }
+        buf[y * Wm + x] = (255 << 24) | (b << 16) | (g << 8) | r;
+      }
+    }
+    mapCtx.putImageData(img, 0, 0);
+    // UFO marker — convert (lat, lon) to map (x, y).
+    const ufoTx = (((ufo.lon / (2 * Math.PI)) % 1) + 1) % 1 * W;
+    const ufoTz = (ufo.lat + Math.PI / 2) / Math.PI * D;
+    const px = Math.floor(ufoTx / W * Wm);
+    const py = Math.floor(ufoTz / D * Hm);
+    mapCtx.fillStyle = '#fff';
+    mapCtx.strokeStyle = '#000';
+    mapCtx.lineWidth = 2;
+    mapCtx.beginPath();
+    mapCtx.arc(px, py, 4, 0, Math.PI * 2);
+    mapCtx.fill();
+    mapCtx.stroke();
+  }
+
+  function openSettings() {
+    document.getElementById('gen-seed').value = SEED;
+    document.getElementById('gen-size').value = String(W);
+    document.getElementById('gen-poles').checked = polesEnabled;
+    mapMeta.textContent = `seed ${SEED} · ${W}×${D} tiles${polesEnabled ? ' · poles' : ''}`;
+    renderMap();
+    settingsBg.classList.add('open');
+  }
+  function closeSettings() { settingsBg.classList.remove('open'); }
+
+  document.getElementById('open-settings').addEventListener('click', openSettings);
+  document.getElementById('close-settings').addEventListener('click', closeSettings);
+  settingsBg.addEventListener('click', e => {
+    if (e.target === settingsBg) closeSettings();
+  });
+  addEventListener('keydown', e => { if (e.key === 'Escape') closeSettings(); });
+
+  document.getElementById('generate-world').addEventListener('click', () => {
+    const seedInput = document.getElementById('gen-seed');
+    const sizeSel = document.getElementById('gen-size');
+    const seed = seedInput.value !== '' ? parseInt(seedInput.value, 10)
+                                        : Math.floor(Math.random() * 1e9);
+    const size = parseInt(sizeSel.value, 10);
+    const poles = document.getElementById('gen-poles').checked;
+    regenerateWorld(seed, size, poles);
+    buildPlanetMesh();
+    uploadPlanetMesh();
+    ufo.lat = 0; ufo.lon = 0; ufo.heading = 0;
+    document.getElementById('info').textContent =
+      `${W}×${D} world, ${heights.length.toLocaleString()} columns, ` +
+      `${(indices.length / 3).toLocaleString()} triangles`;
+    seedInput.value = SEED;
+    mapMeta.textContent = `seed ${SEED} · ${W}×${D} tiles${polesEnabled ? ' · poles' : ''}`;
+    renderMap();
+  });
+
+  // Click on the minimap to teleport. The minimap renders x=0 at lon=0 (the
+  // shader maps gridX/W → lon ∈ [0, 2π)), so the inverse maps u → u*2π and
+  // then wraps into [-π, π) to match the rest of the code.
+  mapCanvas.addEventListener('click', e => {
+    const r = mapCanvas.getBoundingClientRect();
+    const u = (e.clientX - r.left) / r.width;
+    const v = (e.clientY - r.top)  / r.height;
+    let lon = u * 2 * Math.PI;
+    if (lon > Math.PI) lon -= 2 * Math.PI;
+    ufo.lon = lon;
+    ufo.lat = (v * Math.PI) - Math.PI / 2;
+    ufo.lat = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, ufo.lat));
+    renderMap();
+  });
+
+  // ---------- perf instrumentation ----------
+  // GPU time via EXT_disjoint_timer_query. We pool 3 queries so polling for
+  // results never blocks the active frame. Falls back to "n/a" when the
+  // extension isn't available (some browsers gate it behind WebGPU).
+  const tq = gl.getExtension('EXT_disjoint_timer_query_webgl2')
+          || gl.getExtension('EXT_disjoint_timer_query');
+  const TIMER_API = tq && (tq.createQueryEXT
+    ? { create: () => tq.createQueryEXT(),
+        begin: q => tq.beginQueryEXT(tq.TIME_ELAPSED_EXT, q),
+        end:   () => tq.endQueryEXT(tq.TIME_ELAPSED_EXT),
+        ready: q => tq.getQueryObjectEXT(q, tq.QUERY_RESULT_AVAILABLE_EXT),
+        result: q => tq.getQueryObjectEXT(q, tq.QUERY_RESULT_EXT) }
+    : { create: () => gl.createQuery(),
+        begin: q => gl.beginQuery(tq.TIME_ELAPSED_EXT, q),
+        end:   () => gl.endQuery(tq.TIME_ELAPSED_EXT),
+        ready: q => gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE),
+        result: q => gl.getQueryParameter(q, gl.QUERY_RESULT) });
+  const queryPool = tq ? [TIMER_API.create(), TIMER_API.create(), TIMER_API.create()] : null;
+  let queryHead = 0;
+  let lastGpuMs = 0;
+
+  const devEl = document.getElementById('dev-stats');
+  const fpsValEl = document.getElementById('fps-val');
+  const cpuValEl = document.getElementById('cpu-val');
+  const gpuValEl = document.getElementById('gpu-val');
+  const fpsFillEl = document.getElementById('fps-fill');
+  const cpuFillEl = document.getElementById('cpu-fill');
+  const gpuFillEl = document.getElementById('gpu-fill');
+  document.getElementById('dev-meta').textContent =
+    tq ? 'gpu: timer-query' : 'gpu: not available';
+  addEventListener('keydown', e => {
+    if (e.key === '`') devEl.classList.toggle('hidden');
+  });
+
+  // Rolling averages so the bars don't flicker.
+  let cpuAvg = 0, gpuAvg = 0, fpsAvg = 60;
+  let statTimer = 0;
+
+  // Sphericity control — slider for manual, button to play the Inception flip.
+  let sphericity = 1.0;
+  let flipT = -1;                    // -1 = idle; 0..1 plays an animation
+  const sphSlider = document.getElementById('sph-slider');
+  const sphVal    = document.getElementById('sph-val');
+  sphSlider.addEventListener('input', () => {
+    sphericity = parseFloat(sphSlider.value);
+    flipT = -1;                      // cancel any in-progress flip
+  });
+  document.getElementById('sph-flip').addEventListener('click', () => {
+    flipT = 0;                       // start animation
+  });
+
+  // Camera zoom slider — directly controls cam.dist.
+  const zoomSlider = document.getElementById('zoom-slider');
+  const zoomVal    = document.getElementById('zoom-val');
+  zoomSlider.value = cam.dist;
+  zoomSlider.addEventListener('input', () => {
+    cam.dist = parseFloat(zoomSlider.value);
+  });
+
+  // Tilt slider — angles the top-down camera back toward a 3/4 isometric view.
+  const tiltSlider = document.getElementById('tilt-slider');
+  const tiltVal    = document.getElementById('tilt-val');
+  tiltSlider.addEventListener('input', () => {
+    const deg = parseFloat(tiltSlider.value);
+    cam.tilt = deg * Math.PI / 180;
+    tiltVal.textContent = deg.toFixed(0) + '°';
+  });
+
+  // ---------- render loop ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    const cpuStart = performance.now();
+
+    // World-relative piloting: W toward the north pole, S south, A west, D east.
+    // Saucer heading auto-aligns with the movement direction so its nose points
+    // where it's flying.
+    const moveSp = (keys.has('shift') ? 1.6 : 0.7) * dt;
+    let dLat = 0, dLon = 0;
+    if (keys.has('w')) dLat += 1;
+    if (keys.has('s')) dLat -= 1;
+    if (keys.has('d')) dLon += 1;
+    if (keys.has('a')) dLon -= 1;
+    if (dLat || dLon) {
+      // Walk a small step on the unit sphere in 3D, then read back lat/lon.
+      // This is a real great-circle step so pole crossings are seamless.
+      const cl = Math.cos(ufo.lat), sl = Math.sin(ufo.lat);
+      const co = Math.cos(ufo.lon), so = Math.sin(ufo.lon);
+      // World-aligned tangent vectors at the current point.
+      const nVecX = -sl * co, nVecY = cl, nVecZ = -sl * so;       // toward north pole
+      const eVecX = -so,      eVecY = 0,  eVecZ = co;              // toward east
+      const len = Math.hypot(dLat, dLon);
+      const dn = dLat / len, de = dLon / len;
+      // Tangent velocity in world space.
+      const vx = nVecX * dn + eVecX * de;
+      const vy = nVecY * dn + eVecY * de;
+      const vz = nVecZ * dn + eVecZ * de;
+      // Current 3D position on the unit sphere.
+      let px = cl * co, py = sl, pz = cl * so;
+      // Take a step, renormalize back onto the sphere.
+      px += vx * moveSp; py += vy * moveSp; pz += vz * moveSp;
+      const m = Math.sqrt(px * px + py * py + pz * pz) || 1;
+      px /= m; py /= m; pz /= m;
+      ufo.lat = Math.asin(Math.max(-1, Math.min(1, py)));
+      ufo.lon = Math.atan2(pz, px);
+      ufo.heading = Math.atan2(dLon, dLat);
+    }
+    // Keep lon in [-π, π) so floats don't drift forever.
+    ufo.lon = ((ufo.lon + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+
+    const camSp = 1.2 * dt;
+    if (keys.has('arrowleft'))  cam.yaw   -= camSp;
+    if (keys.has('arrowright')) cam.yaw   += camSp;
+    if (keys.has('arrowup'))    cam.pitch -= camSp;
+    if (keys.has('arrowdown'))  cam.pitch += camSp;
+    cam.pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, cam.pitch));
+
+    // UFO world position — sampled at the start of the frame so the camera
+    // and the render pass agree on where the saucer is.
+    const cl0 = Math.cos(ufo.lat), sl0 = Math.sin(ufo.lat);
+    const co0 = Math.cos(ufo.lon), so0 = Math.sin(ufo.lon);
+    const tx0 = Math.floor((((ufo.lon / (2 * Math.PI)) % 1) + 1) % 1 * W);
+    const tz0 = Math.floor((ufo.lat + Math.PI / 2) / Math.PI * D);
+    const surfH0 = (heightAt(tx0, tz0) || 0) * HEIGHT_SCALE;
+    // Absolute altitude — saucer sits at a fixed radius regardless of how
+    // shallow or deep the column under it gets. Terrain can be vacuumed away
+    // and the saucer holds its hover height.
+    const ufoR = PLANET_R + ufo.alt + Math.sin(now / 350) * 0.25;
+    const ufoPos = [cl0 * co0 * ufoR, sl0 * ufoR, cl0 * so0 * ufoR];
+    // Local tangent frame at the UFO's (lat, lon) — east, up, north — used by
+    // both the camera (follow mode) and the UFO render's model matrix.
+    const upX = cl0 * co0, upY = sl0, upZ = cl0 * so0;
+    const eastX = -so0, eastY = 0, eastZ = co0;
+    const northX = -sl0 * co0, northY = cl0, northZ = -sl0 * so0;
+
+    // Camera offset from the UFO. In follow mode the orbit is computed in the
+    // UFO's local (east, up, north) frame so the camera "rides along" as the
+    // saucer flies around the planet — yaw=0 sits behind the saucer, pitch
+    // tilts up over its head. Orbit mode uses the world frame so you can spin
+    // around the saucer at a fixed direction.
+    // Camera-to-saucer distance is FIXED so the saucer keeps the same on-screen
+    // size at any altitude. As the saucer flies up/down the camera tracks with
+    // it from the same offset — only the ground changes apparent scale.
+    let camPos, viewUp;
+    if (cam.mode === 'top') {
+      // Saucer's "back" direction in world space (opposite its heading) — this
+      // is where the camera swings as you increase tilt, so the view ends up
+      // looking forward over the saucer's nose.
+      const sh = Math.sin(ufo.heading), ch = Math.cos(ufo.heading);
+      const backX = -(sh * eastX + ch * northX);
+      const backY = -(sh * eastY + ch * northY);
+      const backZ = -(sh * eastZ + ch * northZ);
+      const ct = Math.cos(cam.tilt), st = Math.sin(cam.tilt);
+      const offX = upX * ct + backX * st;
+      const offY = upY * ct + backY * st;
+      const offZ = upZ * ct + backZ * st;
+      camPos = [
+        ufoPos[0] + offX * cam.dist,
+        ufoPos[1] + offY * cam.dist,
+        ufoPos[2] + offZ * cam.dist,
+      ];
+      // Blend screen-up between local north (when nearly straight down) and
+      // local radial up (when tilted) so the horizon stays level either way.
+      const tm = Math.min(1, cam.tilt / 0.3);
+      viewUp = [
+        northX * (1 - tm) + upX * tm,
+        northY * (1 - tm) + upY * tm,
+        northZ * (1 - tm) + upZ * tm,
+      ];
+    } else {
+      camPos = [
+        ufoPos[0] + cam.dist * Math.cos(cam.pitch) * Math.sin(cam.yaw),
+        ufoPos[1] + cam.dist * Math.sin(cam.pitch),
+        ufoPos[2] + cam.dist * Math.cos(cam.pitch) * Math.cos(cam.yaw),
+      ];
+      viewUp = [0, 1, 0];
+    }
+
+    const proj = mat4Perspective(Math.PI / 3.2, canvas.width / canvas.height,
+                                 0.5, PLANET_R * 20);
+    const view = mat4LookAt(camPos, ufoPos, viewUp);
+    const viewProj = mat4Multiply(proj, view);
+
+    // ---- Mouse → world raycast for tool targeting ----
+    // Unproject the mouse cursor through inverse(viewProj) and intersect with
+    // the average surface sphere. Tools fire at the resulting point.
+    {
+      const invVP = mat4Invert(viewProj);
+      beamTarget = null;
+      if (invVP) {
+        const ndcX = (mouseX / canvas.width)  * 2 - 1;
+        const ndcY = 1 - (mouseY / canvas.height) * 2;
+        const unp = (z) => {
+          const x = invVP[0]*ndcX + invVP[4]*ndcY + invVP[8]*z  + invVP[12];
+          const y = invVP[1]*ndcX + invVP[5]*ndcY + invVP[9]*z  + invVP[13];
+          const w = invVP[3]*ndcX + invVP[7]*ndcY + invVP[11]*z + invVP[15];
+          const zo = invVP[2]*ndcX + invVP[6]*ndcY + invVP[10]*z + invVP[14];
+          return [x / w, y / w, zo / w];
+        };
+        const n = unp(-1), f = unp(1);
+        const dx = f[0] - n[0], dy = f[1] - n[1], dz = f[2] - n[2];
+        const dl = Math.hypot(dx, dy, dz) || 1;
+        const drx = dx / dl, dry = dy / dl, drz = dz / dl;
+        // Sphere a bit above mean ground so the cursor lands on visible terrain.
+        const sphR = PLANET_R + 4;
+        const a = drx*drx + dry*dry + drz*drz;
+        const b = 2 * (n[0]*drx + n[1]*dry + n[2]*drz);
+        const c = n[0]*n[0] + n[1]*n[1] + n[2]*n[2] - sphR * sphR;
+        const disc = b*b - 4*a*c;
+        if (disc >= 0) {
+          const t = (-b - Math.sqrt(disc)) / (2 * a);
+          if (t > 0) beamTarget = [n[0] + drx * t, n[1] + dry * t, n[2] + drz * t];
+        }
+      }
+    }
+
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // ---- Planet pass ----
+    gl.useProgram(program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, vboPos);
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos,   3, gl.FLOAT, false, STRIDE, 0);
+    gl.enableVertexAttribArray(aNorm);
+    gl.vertexAttribPointer(aNorm,  3, gl.FLOAT, false, STRIDE, 12);
+    gl.enableVertexAttribArray(aColor);
+    gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, STRIDE, 24);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+    gl.uniformMatrix4fv(uViewProj, false, viewProj);
+    gl.uniform3f(uCamPos, camPos[0], camPos[1], camPos[2]);
+    gl.uniform2f(uWorldSize, W, D);
+    gl.uniform1f(uPlanetRadius, PLANET_R);
+    gl.uniform1f(uHeightScale, HEIGHT_SCALE);
+    // Animate the Inception flip: sphericity ramps 1 → 0 → 1 over ~3 seconds.
+    if (flipT >= 0) {
+      flipT += dt / 3.0;
+      if (flipT >= 1) { flipT = -1; sphericity = 1.0; }
+      else {
+        // Smooth bounce: 1 → 0 over first half, 0 → 1 over second half.
+        const eased = flipT < 0.5
+          ? 1 - (flipT * 2)
+          : (flipT - 0.5) * 2;
+        sphericity = eased * eased * (3 - 2 * eased);  // smoothstep
+      }
+      sphSlider.value = sphericity;
+    }
+    sphVal.textContent = sphericity.toFixed(2);
+    gl.uniform1f(uSphericity, sphericity);
+
+    // GPU timing wraps the planet draw (the expensive one).
+    let q = null;
+    if (queryPool) {
+      q = queryPool[queryHead];
+      queryHead = (queryHead + 1) % queryPool.length;
+      TIMER_API.begin(q);
+    }
+    gl.drawElements(gl.TRIANGLES, indexCount, idxType, 0);
+    if (q) TIMER_API.end();
+
+    // ---- UFO pass ----
+    // Model matrix: local +X = east, +Y = up (radial out), +Z = north,
+    // rotated by the saucer's heading around its local up axis.
+    const ch = Math.cos(ufo.heading), sh = Math.sin(ufo.heading);
+    // Saucer-forward (its local +Z) = sh*east + ch*north.
+    // Saucer-right   (its local +X) = ch*east - sh*north.
+    const fxX = sh * eastX + ch * northX;
+    const fxY = sh * eastY + ch * northY;
+    const fxZ = sh * eastZ + ch * northZ;
+    const rxX = ch * eastX - sh * northX;
+    const rxY = ch * eastY - sh * northY;
+    const rxZ = ch * eastZ - sh * northZ;
+    const model = new Float32Array([
+      rxX, rxY, rxZ, 0,
+      upX, upY, upZ, 0,
+      fxX, fxY, fxZ, 0,
+      ufoPos[0], ufoPos[1], ufoPos[2], 1,
+    ]);
+
+    // ---- Tractor beam tick: pull voxels off all columns under the beam ----
+    const tractorActive = beaming || (mouseEngaged && currentTool === 'tractor');
+    const spewActive    = retracting || (mouseEngaged && currentTool === 'spew');
+    const laserActive   = lasering || (mouseEngaged && currentTool === 'laser');
+    beamTickTimer += dt;
+    // Helper: tile under the beam target (or under the saucer if cursor's in space).
+    function targetTile() {
+      if (beamTarget) {
+        const r = Math.hypot(beamTarget[0], beamTarget[1], beamTarget[2]) || 1;
+        const lat = Math.asin(Math.max(-1, Math.min(1, beamTarget[1] / r)));
+        const lon = Math.atan2(beamTarget[2], beamTarget[0]);
+        return [
+          Math.floor((((lon / (2 * Math.PI)) % 1) + 1) % 1 * W),
+          Math.max(0, Math.min(D - 1,
+            Math.floor((lat + Math.PI / 2) / Math.PI * D))),
+        ];
+      }
+      return [
+        Math.floor((((ufo.lon / (2 * Math.PI)) % 1) + 1) % 1 * W),
+        Math.floor((ufo.lat + Math.PI / 2) / Math.PI * D),
+      ];
+    }
+
+    if (tractorActive && beamTickTimer >= 0.10) {
+      beamTickTimer = 0;
+      const [ctx, ctz] = targetTile();
+      const radius = 2;                 // 5×5 area = up to 25 columns per tick
+      for (let dz = -radius; dz <= radius; dz++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          if (dx * dx + dz * dz > radius * radius + 0.5) continue;  // rough disc
+          const wtx = ((ctx + dx) % W + W) % W;
+          const wtz = Math.max(0, Math.min(D - 1, ctz + dz));
+          const ti = wtz * W + wtx;
+          const h = heights[ti];
+          if (h <= -DEPTH + 1) continue;        // column fully drilled to magma
+          // If this tile has deposited voxels on top, pop the topmost (it's a
+          // proper LIFO of what got dropped onto it). Otherwise pull biome/strata.
+          let col;
+          const dep = deposits[ti];
+          if (dep && dep.length > 0) col = dep.pop();
+          else                       col = blockColor(wtx, h - 1, wtz);
+          heights[ti] = h - 1;
+          needsRebuild = true;
+          const lat2 = ((wtz + 0.5) / D) * Math.PI - Math.PI / 2;
+          const lon2 = ((wtx + 0.5) / W) * 2 * Math.PI;
+          const cl2 = Math.cos(lat2), sl2 = Math.sin(lat2);
+          const co2 = Math.cos(lon2), so2 = Math.sin(lon2);
+          const r2 = PLANET_R + (h - 1) * HEIGHT_SCALE + HEIGHT_SCALE * 0.5;
+          particles.push({
+            x: cl2 * co2 * r2, y: sl2 * r2, z: cl2 * so2 * r2,
+            vx: 0, vy: 0, vz: 0,
+            color: col, t: 0, life: 8.0,
+            attracted: true,
+          });
+        }
+      }
+    }
+
+    // Throttle the mesh rebuild so we're not re-uploading 1M vertices every frame.
+    rebuildTimer += dt;
+    if (needsRebuild && rebuildTimer >= 0.20) {
+      rebuildTimer = 0;
+      needsRebuild = false;
+      buildPlanetMesh();
+      uploadPlanetMesh();
+    }
+
+    // ---- Laser tick — destroys voxels in a focused area, scatters debris ----
+    laserTickTimer += dt;
+    if (laserActive && laserTickTimer >= 0.07) {
+      laserTickTimer = 0;
+      const [ctx, ctz] = targetTile();
+      const lr = 1;                                  // tighter than tractor
+      for (let dz = -lr; dz <= lr; dz++) {
+        for (let dx = -lr; dx <= lr; dx++) {
+          if (dx * dx + dz * dz > lr * lr + 0.5) continue;
+          const wtx = ((ctx + dx) % W + W) % W;
+          const wtz = Math.max(0, Math.min(D - 1, ctz + dz));
+          const ti = wtz * W + wtx;
+          const h = heights[ti];
+          if (h <= -DEPTH + 1) continue;
+          let col;
+          const dep = deposits[ti];
+          if (dep && dep.length > 0) col = dep.pop();
+          else                       col = blockColor(wtx, h - 1, wtz);
+          heights[ti] = h - 1;
+          needsRebuild = true;
+          // Debris — flies outward + up, doesn't get collected.
+          const lat2 = ((wtz + 0.5) / D) * Math.PI - Math.PI / 2;
+          const lon2 = ((wtx + 0.5) / W) * 2 * Math.PI;
+          const cl2 = Math.cos(lat2), sl2 = Math.sin(lat2);
+          const co2 = Math.cos(lon2), so2 = Math.sin(lon2);
+          const r2 = PLANET_R + (h - 1) * HEIGHT_SCALE + HEIGHT_SCALE * 0.5;
+          const ux2 = cl2 * co2, uy2 = sl2, uz2 = cl2 * so2;
+          const speed = 4 + Math.random() * 4;
+          const tang = (Math.random() - 0.5) * 6;
+          particles.push({
+            x: ux2 * r2, y: uy2 * r2, z: uz2 * r2,
+            vx: ux2 * speed + tang,
+            vy: uy2 * speed + (Math.random() - 0.5) * 4,
+            vz: uz2 * speed + tang,
+            color: col,
+            t: 0, life: 2.5,
+            attracted: false,
+          });
+        }
+      }
+    }
+
+    // ---- Retractor (spew) tick — focused dump straight under the saucer ----
+    // All voxels aimed at the same point on the ground (right below the
+    // saucer) with a small random spread so they pile up rather than scatter.
+    retractTickTimer += dt;
+    if (spewActive && collectedStack.length > 0 && retractTickTimer >= 0.05) {
+      retractTickTimer = 0;
+      const color = collectedStack.pop();
+      // Aim toward the cursor's world target. Falls back to straight down.
+      let dirX = -upX, dirY = -upY, dirZ = -upZ;
+      if (beamTarget) {
+        const dx = beamTarget[0] - ufoPos[0];
+        const dy = beamTarget[1] - ufoPos[1];
+        const dz = beamTarget[2] - ufoPos[2];
+        const dl = Math.hypot(dx, dy, dz) || 1;
+        dirX = dx / dl; dirY = dy / dl; dirZ = dz / dl;
+      }
+      const speed = 9 + Math.random() * 3;
+      const spread = 0.9;
+      const sx = (Math.random() - 0.5) * spread;
+      const sy = (Math.random() - 0.5) * spread * 0.6;
+      const sz = (Math.random() - 0.5) * spread;
+      particles.push({
+        x: ufoPos[0], y: ufoPos[1], z: ufoPos[2],
+        vx: dirX * speed + sx,
+        vy: dirY * speed + sy,
+        vz: dirZ * speed + sz,
+        color, t: 0, life: 8.0,
+        attracted: false,
+      });
+    }
+
+    // Beam released this frame? Each particle's velocity is already pointing
+    // toward the saucer (upward, in most cases) from the attracted phase, so
+    // just preserve it and sprinkle in a bit of random tangential spread.
+    // Gravity will eventually arc them back down — they don't drop instantly.
+    if (prevTractor && !tractorActive) {
+      for (const p of particles) {
+        if (!p.attracted) continue;
+        p.attracted = false;
+        p.vx += (Math.random() - 0.5) * 5;
+        p.vy += (Math.random() - 0.5) * 3;
+        p.vz += (Math.random() - 0.5) * 5;
+      }
+    }
+    // Tractor re-engaged this frame — only re-acquire particles inside the
+    // beam cone (below the saucer, within ~50° half-angle, within altitude+2).
+    if (!prevTractor && tractorActive) {
+      for (const p of particles) {
+        if (p.attracted) continue;
+        const dxp = p.x - ufoPos[0];
+        const dyp = p.y - ufoPos[1];
+        const dzp = p.z - ufoPos[2];
+        const dist = Math.hypot(dxp, dyp, dzp);
+        if (dist < 0.01 || dist > ufo.alt + 2) continue;
+        const cosA = -(dxp * upX + dyp * upY + dzp * upZ) / dist;
+        if (cosA < 0.65) continue;
+        p.attracted = true;
+      }
+    }
+    prevTractor = tractorActive;
+
+    // Update particles.
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.t += dt;
+      if (p.t >= p.life) { particles.splice(i, 1); continue; }
+      if (p.attracted) {
+        // Pull toward the saucer.
+        const dx = ufoPos[0] - p.x;
+        const dy = ufoPos[1] - p.y;
+        const dz = ufoPos[2] - p.z;
+        const d = Math.hypot(dx, dy, dz);
+        if (d < 0.45) {
+          collectedStack.push(p.color);
+          particles.splice(i, 1);
+          continue;
+        }
+        const accel = 2.5 + p.t * 6;
+        const f = accel / d;
+        p.vx = dx * f; p.vy = dy * f; p.vz = dz * f;
+        p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+      } else {
+        // Released — only gravity acts on the particle. With no drag, lateral
+        // momentum is preserved and the trajectory is a clean parabola
+        // (or, on the curved planet, a small ellipse-like arc).
+        const r = Math.hypot(p.x, p.y, p.z) || 1;
+        const ux = p.x / r, uy = p.y / r, uz = p.z / r;
+        const g = 16;
+        p.vx -= ux * g * dt;
+        p.vy -= uy * g * dt;
+        p.vz -= uz * g * dt;
+        p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+        // Landing: convert position to (lat, lon, r), compare against the
+        // surface column at that tile. If we've reached or sunk into the
+        // surface, stack a new voxel there and remove the particle.
+        const newR = Math.hypot(p.x, p.y, p.z);
+        const lat = Math.asin(Math.max(-1, Math.min(1, p.y / newR)));
+        let lon = Math.atan2(p.z, p.x);
+        const tx = Math.floor((((lon / (2 * Math.PI)) % 1) + 1) % 1 * W);
+        const tz = Math.max(0, Math.min(D - 1,
+          Math.floor((lat + Math.PI / 2) / Math.PI * D)));
+        const ti = tz * W + tx;
+        const surfaceR = PLANET_R + heights[ti] * HEIGHT_SCALE;
+        if (newR <= surfaceR + 0.05) {
+          if (heights[ti] < H_MAX - 1) {
+            heights[ti] += 1;
+            (deposits[ti] || (deposits[ti] = [])).push(p.color);
+            needsRebuild = true;
+          }
+          particles.splice(i, 1);
+          continue;
+        }
+      }
+    }
+
+    gl.useProgram(progObject);
+    gl.uniformMatrix4fv(oViewProj, false, viewProj);
+    gl.uniform3f(oCamPos, camPos[0], camPos[1], camPos[2]);
+    gl.uniform3f(oTint, 1, 1, 1);
+
+    // Shadow first, planted on the surface beneath the saucer.
+    const shadowR = PLANET_R + surfH0 + 0.02;
+    const sx = upX * shadowR, sy = upY * shadowR, sz = upZ * shadowR;
+    const shadowModel = new Float32Array([
+      rxX, rxY, rxZ, 0,
+      upX, upY, upZ, 0,
+      fxX, fxY, fxZ, 0,
+      sx,  sy,  sz,  1,
+    ]);
+    gl.bindBuffer(gl.ARRAY_BUFFER, shadowVbo);
+    gl.enableVertexAttribArray(oPos);
+    gl.vertexAttribPointer(oPos,   3, gl.FLOAT, false, STRIDE, 0);
+    gl.enableVertexAttribArray(oNorm);
+    gl.vertexAttribPointer(oNorm,  3, gl.FLOAT, false, STRIDE, 12);
+    gl.enableVertexAttribArray(oColor);
+    gl.vertexAttribPointer(oColor, 3, gl.FLOAT, false, STRIDE, 24);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, shadowIbo);
+    gl.uniformMatrix4fv(oModel, false, shadowModel);
+    gl.drawElements(gl.TRIANGLES, shadowIdxCount, idxType, 0);
+
+    // Saucer.
+    gl.bindBuffer(gl.ARRAY_BUFFER, ufoVbo);
+    gl.vertexAttribPointer(oPos,   3, gl.FLOAT, false, STRIDE, 0);
+    gl.vertexAttribPointer(oNorm,  3, gl.FLOAT, false, STRIDE, 12);
+    gl.vertexAttribPointer(oColor, 3, gl.FLOAT, false, STRIDE, 24);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ufoIbo);
+    gl.uniformMatrix4fv(oModel, false, model);
+    gl.drawElements(gl.TRIANGLES, ufoIdxCount, idxType, 0);
+
+    // ---- Beam cone — visible when tractor or laser is firing ----
+    if (tractorActive || laserActive) {
+      // Aim the cone from the saucer to the cursor target. Cone's local
+      // -Y direction points along (target - saucer), so local Y=-1 lands
+      // exactly on the target. Build an orthonormal basis perpendicular to
+      // that axis using the saucer's east as a reference vector.
+      let ax, ay, az;
+      if (beamTarget) {
+        ax = ufoPos[0] - beamTarget[0];
+        ay = ufoPos[1] - beamTarget[1];
+        az = ufoPos[2] - beamTarget[2];
+      } else {
+        const len = Math.max(0.5, ufo.alt + 0.4);
+        ax = upX * len; ay = upY * len; az = upZ * len;
+      }
+      const yLen = Math.hypot(ax, ay, az) || 1;
+      const yhx = ax / yLen, yhy = ay / yLen, yhz = az / yLen;
+      let xx = eastX, xy = eastY, xz = eastZ;
+      const dd = xx * yhx + xy * yhy + xz * yhz;
+      xx -= yhx * dd; xy -= yhy * dd; xz -= yhz * dd;
+      const xL = Math.hypot(xx, xy, xz) || 1;
+      xx /= xL; xy /= xL; xz /= xL;
+      const zx = yhy * xz - yhz * xy;
+      const zy = yhz * xx - yhx * xz;
+      const zz = yhx * xy - yhy * xx;
+      const beamModel = new Float32Array([
+        xx, xy, xz, 0,
+        ax, ay, az, 0,
+        zx, zy, zz, 0,
+        ufoPos[0], ufoPos[1], ufoPos[2], 1,
+      ]);
+      gl.bindBuffer(gl.ARRAY_BUFFER, beamVbo);
+      gl.vertexAttribPointer(oPos,   3, gl.FLOAT, false, STRIDE, 0);
+      gl.vertexAttribPointer(oNorm,  3, gl.FLOAT, false, STRIDE, 12);
+      gl.vertexAttribPointer(oColor, 3, gl.FLOAT, false, STRIDE, 24);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, beamIbo);
+      gl.uniformMatrix4fv(oModel, false, beamModel);
+      // Tractor = stays green (no tint); laser = red overlay.
+      if (laserActive) gl.uniform3f(oTint, 2.4, 0.5, 0.4);
+      else             gl.uniform3f(oTint, 1, 1, 1);
+      gl.disable(gl.CULL_FACE);
+      gl.drawElements(gl.TRIANGLES, beamIdxCount, idxType, 0);
+      gl.enable(gl.CULL_FACE);
+      gl.uniform3f(oTint, 1, 1, 1);
+    }
+
+    // ---- Particle pass — voxel cubes streaming up to the saucer ----
+    if (particles.length) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, pVbo);
+      gl.vertexAttribPointer(oPos,   3, gl.FLOAT, false, STRIDE, 0);
+      gl.vertexAttribPointer(oNorm,  3, gl.FLOAT, false, STRIDE, 12);
+      gl.vertexAttribPointer(oColor, 3, gl.FLOAT, false, STRIDE, 24);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, pIbo);
+      const pm = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+      for (const p of particles) {
+        pm[12] = p.x; pm[13] = p.y; pm[14] = p.z;
+        gl.uniformMatrix4fv(oModel, false, pm);
+        gl.uniform3f(oTint, p.color[0], p.color[1], p.color[2]);
+        gl.drawElements(gl.TRIANGLES, pIdxCount, idxType, 0);
+      }
+    }
+
+    zoomVal.textContent = cam.dist.toFixed(0);
+    document.getElementById('collected').textContent =
+      collectedStack.length > 0 ? `🛸 ${collectedStack.length} voxels stored` : '';
+    const toolEmoji = currentTool === 'tractor' ? '🟢 Tractor'
+                    : currentTool === 'spew'    ? '🟡 Spew'
+                    :                              '🔴 Laser';
+    document.getElementById('tool-hud').textContent = `Tool: ${toolEmoji}`;
+
+    // Poll the OLDEST query for a finished result.
+    if (queryPool) {
+      const oldQ = queryPool[queryHead];
+      if (TIMER_API.ready(oldQ)) {
+        const ns = TIMER_API.result(oldQ);
+        lastGpuMs = ns / 1e6;
+      }
+    }
+
+    // Update rolling averages.
+    const cpuMs = performance.now() - cpuStart;
+    const fps = dt > 0 ? 1 / dt : 0;
+    const a = 0.12;
+    cpuAvg = cpuAvg * (1 - a) + cpuMs    * a;
+    gpuAvg = gpuAvg * (1 - a) + lastGpuMs * a;
+    fpsAvg = fpsAvg * (1 - a) + fps      * a;
+
+    // Refresh the DOM twice per second to avoid layout thrash.
+    statTimer += dt;
+    if (statTimer >= 0.5 && !devEl.classList.contains('hidden')) {
+      statTimer = 0;
+      const budget = 16.67;
+      fpsValEl.textContent = fpsAvg.toFixed(0);
+      cpuValEl.textContent = cpuAvg.toFixed(1) + ' ms';
+      gpuValEl.textContent = queryPool ? gpuAvg.toFixed(1) + ' ms' : 'n/a';
+      fpsFillEl.style.width = Math.min(100, fpsAvg / 60 * 100).toFixed(1) + '%';
+      cpuFillEl.style.width = Math.min(100, cpuAvg / budget * 100).toFixed(1) + '%';
+      gpuFillEl.style.width = Math.min(100, gpuAvg / budget * 100).toFixed(1) + '%';
+    }
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

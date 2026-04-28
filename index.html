@@ -1,0 +1,2876 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>freeWorld</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { font-family: system-ui, sans-serif; color: #ccc; }
+  canvas { position: fixed; inset: 0; display: block; image-rendering: pixelated; }
+  #gl   { z-index: 0; }
+  #game { z-index: 1; background: transparent; }
+  #hud { position: fixed; top: 8px; left: 10px; font-size: 12px; opacity: 0.7; pointer-events: none; z-index: 10; }
+  #hud.hidden { display: none; }
+  #fps { font-variant-numeric: tabular-nums; }
+  #dev {
+    position: fixed; top: 8px; right: 10px; padding: 10px 12px;
+    background: rgba(20,20,24,0.85); color: #ddd; font: 12px/1.4 system-ui, sans-serif;
+    border: 1px solid #444; border-radius: 6px; min-width: 160px; user-select: none; z-index: 10;
+  }
+  #dev h3 { margin: 0 0 6px; font-size: 11px; letter-spacing: 1px; opacity: 0.7; text-transform: uppercase; }
+  #dev label { display: block; cursor: pointer; padding: 2px 0; }
+  #dev hr { border: 0; border-top: 1px solid #333; margin: 6px 0; }
+  #dev input { vertical-align: middle; margin-right: 6px; }
+  #dev.hidden { display: none; }
+  #dev button {
+    margin-top: 8px; width: 100%; padding: 6px;
+    background: #2a2a32; color: #ddd; border: 1px solid #555;
+    border-radius: 4px; cursor: pointer; font: inherit;
+  }
+  #dev button:hover { background: #3a3a44; }
+  .swatch {
+    width: 22px; height: 22px; border-radius: 4px; cursor: pointer;
+    border: 2px solid transparent; box-sizing: border-box; transition: border 0.1s;
+  }
+  .swatch:hover { border-color: #888; }
+  .swatch.active { border-color: #fff; box-shadow: 0 0 0 1px #000; }
+  .beam-mode {
+    flex: 1; padding: 4px 6px; cursor: pointer;
+    background: #222228; color: #ccc; border: 1px solid #444;
+    border-radius: 4px; font: 11px/1 inherit; font-weight: 600;
+  }
+  .beam-mode:hover { background: #2e2e36; }
+  .beam-mode.active { background: #2a4a2a; color: #d8ffd8; border-color: #6a8; }
+  .beam-mode[data-type="bomb"].active { background: #1a1a1a; color: #fff; border-color: #888; }
+  .beam-mode.lugia { background: #1a263a; color: #cef2ff; border-color: #4a7faf; }
+  .beam-mode.lugia:hover { background: #233553; }
+  .beam-mode.lugia.active {
+    background: #2a4878; color: #fff; border-color: #aef0ff;
+    box-shadow: 0 0 8px rgba(170, 230, 255, 0.55);
+  }
+  .beam-mode.lugia.locked { opacity: 0.45; }
+
+  #settings-bg {
+    position: fixed; inset: 0; z-index: 20;
+    background: rgba(10,12,20,0.55);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    display: none; align-items: center; justify-content: center;
+  }
+  #settings-bg.open { display: flex; }
+  #settings {
+    background: rgba(24,24,30,0.95); color: #ddd;
+    border: 1px solid #444; border-radius: 10px;
+    padding: 22px; min-width: 340px; max-width: 90vw; max-height: 90vh;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+    font: 13px/1.5 system-ui, sans-serif;
+  }
+  #settings h2 {
+    margin: 0 0 14px; font-size: 14px; letter-spacing: 1.5px;
+    text-transform: uppercase; opacity: 0.85;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  #settings h2 .close {
+    cursor: pointer; opacity: 0.6; font-size: 18px; line-height: 1;
+  }
+  #settings h2 .close:hover { opacity: 1; }
+  #settings .row {
+    display: flex; gap: 10px; align-items: center;
+    padding: 8px 0; border-top: 1px solid #2a2a32;
+  }
+  #settings .row:first-of-type { border-top: 0; }
+  #settings .row .label { flex: 1; opacity: 0.85; }
+  #settings button.action {
+    background: #2a2a32; color: #ddd; border: 1px solid #555;
+    padding: 6px 14px; border-radius: 4px; cursor: pointer; font: inherit;
+  }
+  #settings button.action:hover { background: #3a3a44; }
+  #map {
+    display: block; margin: 12px auto 0;
+    image-rendering: pixelated;
+    border: 1px solid #444; border-radius: 4px;
+    background: #000; cursor: crosshair;
+  }
+  #map:hover { border-color: #888; }
+  #map-meta { text-align: center; opacity: 0.6; font-size: 11px; margin-top: 6px; }
+
+  #inventory {
+    position: fixed; bottom: 12px; left: 12px; z-index: 10;
+    display: flex; flex-wrap: wrap; gap: 6px; max-width: 70vw;
+    pointer-events: none;
+  }
+  .inv-slot {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 9px 5px 5px;
+    background: rgba(20, 20, 28, 0.78);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 6px;
+    font: 12px/1 system-ui, sans-serif;
+    color: #e4e4ea;
+  }
+  .inv-swatch {
+    width: 14px; height: 14px; border-radius: 3px;
+    border: 1px solid rgba(0,0,0,0.6);
+  }
+  .inv-count { font-variant-numeric: tabular-nums; opacity: 0.85; }
+</style>
+</head>
+<body>
+  <div id="hud">
+    WASD to move &middot; <kbd style="opacity:0.7">space</kbd> land &middot;
+    <kbd style="opacity:0.7">B</kbd> beam &middot; <kbd style="opacity:0.7">`</kbd> dev
+    <span id="abducted" style="margin-left: 12px; opacity: 0.85"></span>
+  </div>
+  <div id="dev">
+    <h3>Dev <span id="fps" style="float:right;opacity:0.7">– fps</span></h3>
+    <label><input type="checkbox" data-toggle="tree"  checked> Trees</label>
+    <label><input type="checkbox" data-toggle="pine"  checked> Pines</label>
+    <label><input type="checkbox" data-toggle="grass" checked> Grass tufts</label>
+    <label><input type="checkbox" data-toggle="rock"  checked> Rocks</label>
+    <label><input type="checkbox" data-toggle="prints" checked> Footprints</label>
+    <label><input type="checkbox" data-toggle="entities" checked> Creatures</label>
+    <label><input type="checkbox" data-toggle="editor"> Block editor</label>
+    <div id="palette" style="margin: 4px 0 4px 18px; display: flex; flex-wrap: wrap; gap: 4px"></div>
+    <hr>
+    <label><input type="checkbox" data-toggle="wind"     checked> Wind on grass</label>
+    <label><input type="checkbox" data-toggle="daycycle" checked> Day/night cycle</label>
+    <label><input type="checkbox" data-toggle="light"    checked> Player light</label>
+    <label><input type="checkbox" data-toggle="vignette" checked> Vignette</label>
+    <div style="margin-top:6px">
+      <div style="opacity:0.8; margin-bottom:3px">Beam</div>
+      <div id="beam-modes" style="display:flex; gap:4px">
+        <button class="beam-mode active" data-type="wide"         title="Wide spread (Q)">Wide</button>
+        <button class="beam-mode"        data-type="concentrated" title="Concentrated (W)">Focus</button>
+        <button class="beam-mode"        data-type="bomb"         title="Bomb (E)">Bomb</button>
+        <button class="beam-mode lugia"  data-type="lugia"        title="Aeroblast — orbit only (R)">Lugia</button>
+      </div>
+    </div>
+    <label style="display:flex; gap:6px; align-items:center; margin-top:6px">
+      <span style="opacity:0.8; min-width:48px">Weather</span>
+      <select id="weather-sel" style="flex:1; background:#1a1a22; color:#ddd; border:1px solid #444; border-radius:3px; padding:2px 4px">
+        <option value="auto">Auto</option>
+        <option value="clear" selected>Clear</option>
+        <option value="cloudy">Cloudy</option>
+        <option value="rain">Rain</option>
+        <option value="storm">Storm</option>
+      </select>
+    </label>
+    <label style="display:flex; gap:6px; align-items:center; margin-top:6px">
+      <span style="opacity:0.8; min-width:38px">Zoom</span>
+      <input type="range" id="zoom-slider" min="0.10" max="2.50" step="0.01" value="1.00" style="flex:1">
+    </label>
+    <button id="open-settings">Open settings</button>
+  </div>
+
+  <div id="settings-bg">
+    <div id="settings">
+      <h2>Settings <span class="close" id="close-settings">&times;</span></h2>
+      <div class="row">
+        <div class="label">
+          <div>Export world</div>
+          <div style="opacity:0.6;font-size:11px">Saves seed, player position, and all placed blocks as JSON.</div>
+        </div>
+        <button class="action" id="export-world">Export</button>
+      </div>
+      <div class="row">
+        <div class="label">
+          <div>Clear save</div>
+          <div style="opacity:0.6;font-size:11px">Auto-saves to your browser. Click to wipe and start fresh on next reload.</div>
+        </div>
+        <button class="action" id="clear-save">Clear</button>
+      </div>
+      <div class="row">
+        <div class="label">
+          <div>Character</div>
+          <div style="opacity:0.6;font-size:11px">Pick your form.</div>
+        </div>
+        <select id="character" class="action">
+          <option value="dot">Dot</option>
+          <option value="saucer" selected>Flying saucer</option>
+        </select>
+      </div>
+      <div class="row">
+        <div class="label">
+          <div>Generate world</div>
+          <div style="opacity:0.6;font-size:11px">New seed and dimensions. Resets placed blocks and player.</div>
+          <div style="margin-top:6px; display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+            <label>Seed
+              <input type="number" id="gen-seed" style="width:110px; background:#1a1a22; color:#ddd; border:1px solid #444; border-radius:3px; padding:2px 4px">
+            </label>
+            <label>Size
+              <select id="gen-size" style="background:#1a1a22; color:#ddd; border:1px solid #444; border-radius:3px; padding:2px 4px">
+                <option value="256">256 × 256</option>
+                <option value="512">512 × 512</option>
+                <option value="1024" selected>1024 × 1024</option>
+                <option value="2048">2048 × 2048</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <button class="action" id="generate-world">Generate</button>
+      </div>
+      <div class="row">
+        <div class="label">
+          <div>World map</div>
+          <div style="opacity:0.6;font-size:11px" id="map-meta">– seed</div>
+        </div>
+      </div>
+      <canvas id="map" width="256" height="256"></canvas>
+    </div>
+  </div>
+  <div id="inventory"></div>
+  <canvas id="gl"></canvas>
+  <canvas id="game"></canvas>
+
+<script id="vs" type="x-shader/x-vertex">
+attribute vec2 aPos;
+void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+</script>
+
+<script id="fs" type="x-shader/x-fragment">
+precision highp float;
+
+uniform sampler2D uTerrain;   // R=elev, G=moist, B=overrideId, A=unused
+uniform vec2  uResolution;    // canvas size in pixels
+uniform float uTile;          // pixels per tile
+uniform vec2  uWorldSize;     // world size in tiles
+uniform float uTime;
+uniform vec2  uPlayer;        // world-pixel coord (camera focus)
+uniform float uDay;           // 0 = noon, 1 = midnight
+uniform float uLight;         // 0..1 player light strength
+uniform float uVignette;      // 0..1
+uniform float uWind;          // 0..1
+uniform float uZoom;          // pixels-per-world-pixel; <0.4 → globe view
+uniform float uClouds;        // 0..1 cloud cover
+uniform float uWet;           // 0..1 ground wetness (rain darkens terrain)
+uniform float uFlash;         // 0..1 lightning flash overlay
+
+float hash(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = hash(i);
+  float b = hash(i + vec2(1.0, 0.0));
+  float c = hash(i + vec2(0.0, 1.0));
+  float d = hash(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// Procedural block at (tile, layer). Computed every frame, never stored —
+// memory cost is exactly one byte per tile (the dig depth) regardless of how
+// far down anything has been excavated.
+//   layer  0       biome surface (returns vec3(-1) so caller uses biome color)
+//   layer  1- 2    dirt
+//   layer  3- 7    shallow stone w/ occasional coal
+//   layer  8-15    deeper stone w/ iron veins, occasional gold
+//   layer 16-23    bedrock-grey w/ rare gold
+//   layer 24+      groundwater → lava
+vec3 blockAtDepth(vec2 tile, float layer) {
+  if (layer < 1.0)  return vec3(-1.0);                         // surface sentinel
+  if (layer < 3.0)  return vec3(0.43, 0.31, 0.23);             // dirt
+  float h = hash(tile + vec2(floor(layer) * 13.0, floor(layer) * 31.0));
+  if (layer < 8.0) {
+    if (h < 0.07) return vec3(0.10, 0.10, 0.12);               // coal
+    return vec3(0.47, 0.46, 0.45);                             // stone
+  }
+  if (layer < 16.0) {
+    if (h < 0.05) return vec3(0.85, 0.70, 0.22);               // gold
+    if (h < 0.14) return vec3(0.62, 0.42, 0.22);               // iron
+    return vec3(0.40, 0.40, 0.44);                             // gray stone
+  }
+  if (layer < 24.0) {
+    if (h < 0.03) return vec3(0.85, 0.70, 0.22);               // gold (rarer)
+    return vec3(0.28, 0.28, 0.32);                             // bedrock
+  }
+  if (layer < 30.0) return vec3(0.20, 0.40, 0.68);             // groundwater
+  return vec3(0.95, 0.42, 0.10);                               // lava
+}
+
+// Tileable variant: same as vnoise but the integer lattice wraps with `period`,
+// so the noise is seamless when sampled across the world wrap.
+float vnoiseT(vec2 p, vec2 period) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  vec2 i00 = mod(i,                 period);
+  vec2 i10 = mod(i + vec2(1.0,0.0), period);
+  vec2 i01 = mod(i + vec2(0.0,1.0), period);
+  vec2 i11 = mod(i + vec2(1.0,1.0), period);
+  float a = hash(i00);
+  float b = hash(i10);
+  float c = hash(i01);
+  float d = hash(i11);
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+void main() {
+  vec2 frag = gl_FragCoord.xy;
+  vec2 sxy = vec2(frag.x, uResolution.y - frag.y) - uResolution * 0.5;
+
+  // Sphere world radius: chosen so the visible hemisphere arc spans half the world width.
+  float R_w = uTile * uWorldSize.x / 3.14159265;
+  float Rs  = R_w * uZoom;
+  vec2  sp  = sxy / Rs;
+  float r2  = dot(sp, sp);
+
+  // Off-globe: space (only happens when zoomed out enough that hemisphere fits in view).
+  if (r2 >= 1.0) {
+    float starHash = hash(floor(frag * 0.7));
+    float star = smoothstep(0.997, 1.0, starHash);
+    vec3 space = vec3(0.01, 0.012, 0.04) + vec3(star) * 0.9;
+    space += vec3(0.30, 0.55, 0.95) * smoothstep(1.7, 1.0, r2) * 0.5;
+    gl_FragColor = vec4(space, 1.0);
+    return;
+  }
+
+  float z = sqrt(max(0.0, 1.0 - r2));
+  float angle = acos(z);
+  float dirLen = sqrt(r2);
+  vec2  dir = (dirLen > 1e-5) ? sp / dirLen : vec2(0.0);
+  float arc = angle * R_w;
+  vec2  worldPx = uPlayer + dir * arc;
+
+  // Globe lighting (limb darkening + directional sun).
+  vec3 sunDir  = normalize(vec3(0.45, -0.40, 0.7));
+  vec3 normal  = vec3(sp.x, sp.y, z);
+  float diff   = max(0.0, dot(normal, sunDir));
+  vec3 globeShade = vec3(0.55 + 0.55 * diff) * (0.65 + 0.35 * z);
+
+  // Globe shading is strongest when zoomed out, vignette takes over when zoomed in.
+  float globeWeight = 1.0 - smoothstep(0.45, 1.10, uZoom);
+
+  // Texture is REPEAT-wrapped, so any uv works — fract() makes the tiling explicit.
+  vec2 tileF = worldPx / uTile;
+  vec2 uv = fract(tileF / uWorldSize);
+
+  // Linear sample (smoothly interpolates elev/moist between tile centers).
+  vec4 t = texture2D(uTerrain, uv);
+  float elev = t.r;
+  float moist = t.g;
+
+  // Nearest-snap sample for override id + voxel removal (alpha = removed/255).
+  vec2 snapUV = (floor(uv * uWorldSize) + 0.5) / uWorldSize;
+  vec4 snap = texture2D(uTerrain, snapUV);
+  float overrideId = snap.b * 255.0;
+  float removed = snap.a;
+  float layer = floor(removed * 32.0 + 0.001);
+
+  vec3 col;
+  bool isWater = false;
+
+  if (overrideId > 0.5) {
+    if      (overrideId < 1.5) col = vec3(0.86, 0.78, 0.55);            // sand
+    else if (overrideId < 2.5) col = vec3(0.47, 0.46, 0.45);            // stone
+    else if (overrideId < 3.5) col = vec3(0.43, 0.31, 0.23);            // dirt
+    else if (overrideId < 4.5) { col = vec3(0.20, 0.40, 0.68); isWater = true; } // water
+    else if (overrideId < 5.5) col = vec3(0.86, 0.86, 0.90);            // snow
+    else                       col = vec3(0.66, 0.56, 0.44);            // path
+  } else if (removed > 0.95) {
+    // HOLE through the planet — render the same starfield + atmosphere as space
+    // so you can see clear through to the other side.
+    float starHash = hash(floor(frag * 0.7));
+    float star = smoothstep(0.997, 1.0, starHash);
+    vec3 space = vec3(0.01, 0.012, 0.04) + vec3(star) * 0.9;
+    space += vec3(0.30, 0.55, 0.95) * 0.12;     // faint atmospheric glow at the rim
+    gl_FragColor = vec4(space, 1.0);
+    return;
+  } else if (layer >= 1.0) {
+    // Dug — pull the visible block from the procedural depth function.
+    vec2 tilePos = floor(worldPx / uTile);
+    vec3 dug = blockAtDepth(tilePos, layer);
+    col = dug;
+    if (layer >= 24.0 && layer < 30.0) isWater = true;
+  } else if (elev < 0.35) {
+    col = vec3(0.07, 0.16, 0.38); isWater = true;
+  } else if (elev < 0.42) {
+    col = vec3(0.18, 0.40, 0.68); isWater = true;
+  } else if (elev < 0.46) {
+    col = vec3(0.86, 0.78, 0.55); // sand
+  } else if (elev < 0.70) {
+    // Smooth blend dry→lush grass with moisture.
+    col = mix(vec3(0.55, 0.67, 0.31), vec3(0.27, 0.51, 0.24),
+              smoothstep(0.40, 0.55, moist));
+  } else if (elev < 0.82) {
+    col = vec3(0.35, 0.31, 0.24); // hills
+  } else {
+    col = vec3(0.86, 0.86, 0.90); // snow
+  }
+
+  // World wraps every uTile*uWorldSize world-pixels; pre-compute integer noise periods
+  // so vnoiseT seams cleanly across the world wrap.
+  vec2 wpSize = uTile * uWorldSize;
+  vec2 per04  = floor(wpSize * 0.4 + 0.5);
+  vec2 per008 = floor(wpSize * 0.08 + 0.5);
+  vec2 per07  = floor(wpSize * 0.7 + 0.5);
+
+  // Damp pixel-scale effects at low zoom — otherwise the per-fragment noise
+  // aliases into salt-and-pepper speckle when each screen pixel covers many
+  // world units. At zoom >= ~0.6 the full noise plays; below 0.2 it's gone.
+  float pxDamp = smoothstep(0.20, 0.65, uZoom);
+
+  // Sub-tile procedural variation.
+  float n = vnoiseT(worldPx * 0.4, per04);
+  float nLow = vnoiseT(worldPx * 0.08, per008);
+  if (!isWater && overrideId < 0.5) {
+    col *= mix(1.0, 0.82 + n * 0.32,  pxDamp);
+    col *= mix(1.0, 0.92 + nLow * 0.16, pxDamp);
+  }
+
+  // Wind-blown grass blades on grass biomes.
+  if (overrideId < 0.5 && elev >= 0.46 && elev < 0.70 && pxDamp > 0.001) {
+    float windOff = sin(worldPx.y * 0.18 + uTime * 1.4) * uWind * 1.6;
+    float blades = vnoiseT(vec2(worldPx.x + windOff, worldPx.y) * 0.7, per07);
+    blades = smoothstep(0.55, 0.72, blades);
+    vec3 grassHi = vec3(0.55, 0.82, 0.36);
+    col = mix(col, grassHi, blades * 0.45 * pxDamp);
+  }
+
+  // Animated water with specular sparkle and shoreline foam.
+  if (isWater) {
+    float wave1 = sin(worldPx.x * 0.06 + worldPx.y * 0.04 + uTime * 0.6);
+    float wave2 = sin(worldPx.x * 0.03 - worldPx.y * 0.05 + uTime * 0.4);
+    col += vec3(0.04, 0.08, 0.14) * (wave1 + wave2) * 0.5 * pxDamp;
+
+    float s1 = max(0.0, sin(worldPx.x * 0.22 + uTime * 1.7));
+    float s2 = max(0.0, sin(worldPx.y * 0.19 + uTime * 1.3));
+    float spec = pow(s1 * s2, 4.0);
+    col += vec3(0.6, 0.7, 0.8) * spec * 0.5 * pxDamp;
+
+    // Sample 4 neighbors one tile away to detect shoreline.
+    vec2 step = vec2(uTile) / (uWorldSize * uTile);
+    float maxN = max(
+      max(texture2D(uTerrain, uv + vec2( step.x, 0.0)).r,
+          texture2D(uTerrain, uv + vec2(-step.x, 0.0)).r),
+      max(texture2D(uTerrain, uv + vec2(0.0,  step.y)).r,
+          texture2D(uTerrain, uv + vec2(0.0, -step.y)).r));
+    if (maxN >= 0.42) {
+      float foam = sin(uTime * 2.5 + worldPx.x * 0.1) * 0.5 + 0.5;
+      col = mix(col, vec3(0.85, 0.93, 1.0), 0.5 * foam);
+    }
+  }
+
+  // Day/night tint.
+  vec3 nightTint = vec3(0.18, 0.24, 0.48);
+  col = mix(col, col * nightTint, uDay * 0.88);
+
+  // Player radial light — warm, only really shows at night.
+  if (uLight > 0.001) {
+    float d = distance(worldPx, uPlayer);
+    float r = 220.0;
+    float light = exp(-d * d / (r * r * 0.55));
+    col += vec3(1.0, 0.86, 0.62) * light * uLight * (0.25 + uDay * 0.9);
+  }
+
+  // Cliff shading + ambient depth darkening — gives pits a sense of how DEEP
+  // they are, not just where the layer transitions are. Sun from NW.
+  {
+    vec2 stp = 1.0 / uWorldSize;
+    float remNW = texture2D(uTerrain, snapUV + vec2(-stp.x, -stp.y)).a;
+    float remN  = texture2D(uTerrain, snapUV + vec2(0.0,    -stp.y)).a;
+    float remW  = texture2D(uTerrain, snapUV + vec2(-stp.x, 0.0   )).a;
+    float remSE = texture2D(uTerrain, snapUV + vec2( stp.x,  stp.y)).a;
+    float remS  = texture2D(uTerrain, snapUV + vec2(0.0,     stp.y)).a;
+    float remE  = texture2D(uTerrain, snapUV + vec2( stp.x, 0.0   )).a;
+    // Multi-neighbor shadow: sun-side higher neighbors stack their darkness.
+    float shadow    = max(0.0, removed - remNW)
+                    + max(0.0, removed - remN)  * 0.55
+                    + max(0.0, removed - remW)  * 0.55;
+    float highlight = max(0.0, remSE - removed) * 0.5
+                    + max(0.0, remS  - removed) * 0.35
+                    + max(0.0, remE  - removed) * 0.35;
+    // Quantize so cliff edges are sharp at integer-voxel boundaries.
+    shadow    = floor(shadow    * 8.0 + 0.5) / 8.0;
+    highlight = floor(highlight * 8.0 + 0.5) / 8.0;
+    col *= 1.0 - min(0.85, shadow * 0.65);
+    col *= 1.0 + min(0.45, highlight * 0.22);
+    // Ambient depth darkening: deeper pits are darker overall, even where
+    // there's no neighbor cliff. Lava layer keeps its glow.
+    if (layer < 30.0) col *= 1.0 - removed * 0.32;
+  }
+
+  // Wet ground: darken + slight blue tint while raining.
+  if (uWet > 0.001) {
+    col = mix(col, col * vec3(0.65, 0.72, 0.85), uWet);
+  }
+
+  // Drifting clouds: tileable noise scrolled by time, layered for chunkiness.
+  // Drawn after biome/water/wind effects so clouds shadow + cover everything.
+  if (uClouds > 0.001) {
+    vec2 cw1 = wpSize * 0.18;
+    vec2 cw2 = wpSize * 0.10;
+    vec2 driftA = worldPx * 0.0014 + vec2(uTime * 0.012, uTime * 0.005);
+    vec2 driftB = worldPx * 0.0009 + vec2(uTime * 0.008, -uTime * 0.004);
+    float c1 = vnoiseT(driftA * cw1, cw1);
+    float c2 = vnoiseT(driftB * cw2, cw2);
+    float clouds = c1 * 0.6 + c2 * 0.4;
+    // Threshold scales with cover — high uClouds spreads coverage.
+    float density = smoothstep(0.65 - uClouds * 0.35, 0.85 - uClouds * 0.25, clouds);
+    // Cloud shadow on the ground.
+    col *= mix(1.0, 0.62, density * 0.7);
+    // Cloud body itself, drawn with a slight blue tint at night.
+    vec3 cloudCol = mix(vec3(1.0, 1.0, 1.0), vec3(0.55, 0.62, 0.85), uDay);
+    col = mix(col, cloudCol, density * uClouds * 0.85);
+  }
+
+  // Blend globe shading (zoomed out) with screen-space vignette (zoomed in).
+  vec2 vd = frag / uResolution - 0.5;
+  float vig = 1.0 - dot(vd, vd) * 1.6 * uVignette;
+  col *= mix(vec3(vig), globeShade, globeWeight);
+
+  // Lightning flash — bright additive overlay on top of everything else.
+  col += vec3(0.85, 0.92, 1.05) * uFlash;
+
+  gl_FragColor = vec4(col, 1.0);
+}
+</script>
+
+<script>
+(() => {
+  const glCanvas = document.getElementById('gl');
+  const gl = glCanvas.getContext('webgl', { antialias: false, alpha: false });
+  if (!gl) { document.body.innerText = 'WebGL not supported.'; return; }
+  const game = document.getElementById('game');
+  const ctx = game.getContext('2d');
+
+  function resize() {
+    const w = window.innerWidth, h = window.innerHeight;
+    glCanvas.width = w; glCanvas.height = h;
+    game.width = w; game.height = h;
+    gl.viewport(0, 0, w, h);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // --- World constants ---
+  const TILE = 24;
+  const SCALE = TILE / 8;
+  let WORLD_W = 1024;
+  let WORLD_H = 1024;
+
+  // --- Procedural generation (unchanged) ---
+  function rng(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  let SEED = Math.floor(Math.random() * 1e9);
+  let rand = rng(SEED);
+
+  // Tileable value noise: grid wraps with period (gw, gh), and sampling positions are
+  // chosen so x = 0 and x = w produce identical values — same for y. The wrap is
+  // therefore invisible at the world seam.
+  function makeNoise(w, h, scale) {
+    const gw = Math.max(1, Math.round(w / scale));
+    const gh = Math.max(1, Math.round(h / scale));
+    const grid = new Float32Array(gw * gh);
+    for (let i = 0; i < grid.length; i++) grid[i] = rand();
+    const out = new Float32Array(w * h);
+    const smooth = t => t * t * (3 - 2 * t);
+    for (let y = 0; y < h; y++) {
+      const gy = y * gh / h;
+      const y0 = Math.floor(gy);
+      const y1 = (y0 + 1) % gh;
+      const ty = smooth(gy - y0);
+      for (let x = 0; x < w; x++) {
+        const gx = x * gw / w;
+        const x0 = Math.floor(gx);
+        const x1 = (x0 + 1) % gw;
+        const tx = smooth(gx - x0);
+        const a = grid[y0 * gw + x0];
+        const b = grid[y0 * gw + x1];
+        const c = grid[y1 * gw + x0];
+        const d = grid[y1 * gw + x1];
+        const ab = a + (b - a) * tx;
+        const cd = c + (d - c) * tx;
+        out[y * w + x] = ab + (cd - ab) * ty;
+      }
+    }
+    return out;
+  }
+
+  const BLOCK_DEFS = {
+    1: { name: 'Sand',  biome: 'sand',       passable: true,  swatch: '#dcc88c' },
+    2: { name: 'Stone', biome: 'hills',      passable: true,  swatch: '#797673' },
+    3: { name: 'Dirt',  biome: 'grass_dry',  passable: true,  swatch: '#6e503a' },
+    4: { name: 'Water', biome: 'water',      passable: false, swatch: '#3266aa' },
+    5: { name: 'Snow',  biome: 'snow',       passable: true,  swatch: '#dcdce6' },
+    6: { name: 'Path',  biome: 'sand',       passable: true,  swatch: '#a89070' },
+  };
+  let elev, moist, overrides, texData;
+  // Noise scales chosen relative to a 1024-wide world; we scale them with size so
+  // continents stay roughly the same proportion at smaller/larger worlds.
+  function buildTerrain() {
+    const k = WORLD_W / 1024;
+    const n1 = makeNoise(WORLD_W, WORLD_H, 96 * k);
+    const n2 = makeNoise(WORLD_W, WORLD_H, 32 * k);
+    const n3 = makeNoise(WORLD_W, WORLD_H, 12 * k);
+    elev  = new Float32Array(WORLD_W * WORLD_H);
+    moist = new Float32Array(WORLD_W * WORLD_H);
+    overrides = new Uint8Array(WORLD_W * WORLD_H);
+    texData = new Uint8Array(WORLD_W * WORLD_H * 4);
+    for (let i = 0; i < elev.length; i++) {
+      elev[i]  = n1[i] * 0.6 + n2[i] * 0.3 + n3[i] * 0.1;
+      moist[i] = n2[i] * 0.5 + n3[i] * 0.5;
+      texData[i * 4 + 0] = Math.max(0, Math.min(255, Math.floor(elev[i]  * 255)));
+      texData[i * 4 + 1] = Math.max(0, Math.min(255, Math.floor(moist[i] * 255)));
+      texData[i * 4 + 2] = 0;
+      texData[i * 4 + 3] = 0;          // removed-voxel height (0 = pristine)
+    }
+  }
+  buildTerrain();
+
+  // --- WebGL setup ---
+  function compileShader(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      console.error(gl.getShaderInfoLog(sh));
+      throw new Error('Shader compile failed');
+    }
+    return sh;
+  }
+  const vs = compileShader(gl.VERTEX_SHADER,   document.getElementById('vs').textContent);
+  const fs = compileShader(gl.FRAGMENT_SHADER, document.getElementById('fs').textContent);
+  const program = gl.createProgram();
+  gl.attachShader(program, vs);
+  gl.attachShader(program, fs);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(program));
+    throw new Error('Program link failed');
+  }
+  gl.useProgram(program);
+
+  // Single big triangle covering the screen.
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const aPos = gl.getAttribLocation(program, 'aPos');
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, WORLD_W, WORLD_H, 0, gl.RGBA, gl.UNSIGNED_BYTE, texData);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+
+  const U = name => gl.getUniformLocation(program, name);
+  const uni = {
+    terrain: U('uTerrain'), resolution: U('uResolution'),
+    tile: U('uTile'), worldSize: U('uWorldSize'), time: U('uTime'),
+    player: U('uPlayer'), day: U('uDay'), light: U('uLight'),
+    vignette: U('uVignette'), wind: U('uWind'), zoom: U('uZoom'),
+    clouds: U('uClouds'), wet: U('uWet'), flash: U('uFlash'),
+  };
+  gl.uniform1i(uni.terrain, 0);
+  gl.uniform2f(uni.worldSize, WORLD_W, WORLD_H);
+  gl.uniform1f(uni.tile, TILE);
+
+  let saveDirty = false;
+  let mapBaseDirty = true;
+  function markDirty() { saveDirty = true; mapBaseDirty = true; }
+
+  // --- Voxel removal (beam terraforming) ---
+  // Each tile has a "removed" byte stored in the texture alpha channel.
+  // Each unit of 32 = one voxel layer (~8 layers per tile).
+  function strataHash(tx, ty, layer) {
+    const x = (tx | 0) + (layer | 0) * 13;
+    const y = (ty | 0) + (layer | 0) * 31;
+    let h = x * 374761393 + y * 668265263 + (SEED | 0);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+
+  // Single source of truth: what type of block sits at (tx, ty, layer)?
+  // Mirrors the shader's blockAtDepth so colors and counts agree.
+  function blockAt(tx, ty, layer) {
+    if (layer === 0) {
+      const b = biomeAt(tx, ty);
+      if (b === 'sand')                              return { type: 'sand',  color: '#dcc88c' };
+      if (b === 'water' || b === 'water_deep')       return { type: 'water', color: '#3266aa' };
+      if (b === 'grass_lush' || b === 'grass_dry')   return { type: 'grass', color: '#3d7c3a' };
+      if (b === 'hills')                             return { type: 'stone', color: '#5a4838' };
+      if (b === 'snow')                              return { type: 'snow',  color: '#dcdce6' };
+      return { type: 'dirt', color: '#8c6840' };
+    }
+    if (layer < 3)    return { type: 'dirt', color: '#704830' };
+    const h = strataHash(tx, ty, layer);
+    if (layer < 8) {
+      if (h < 0.07) return { type: 'coal',  color: '#1a1a1f' };
+      return         { type: 'stone', color: '#777474' };
+    }
+    if (layer < 16) {
+      if (h < 0.05) return { type: 'gold',  color: '#d8b338' };
+      if (h < 0.14) return { type: 'iron',  color: '#9d6938' };
+      return         { type: 'stone', color: '#666670' };
+    }
+    if (layer < 24) {
+      if (h < 0.03) return { type: 'gold',    color: '#d8b338' };
+      return         { type: 'bedrock', color: '#48484e' };
+    }
+    if (layer < 30)   return { type: 'water', color: '#3266aa' };
+    return             { type: 'lava',  color: '#f26a18' };
+  }
+  function blockColorAtDepth(tx, ty, layer) { return blockAt(tx, ty, layer).color; }
+
+  // --- Inventory ---
+  // Every voxel popped, every abducted creature, every decoration uprooted on
+  // the first dig of a tile lands here. Type → count.
+  const inventory = Object.create(null);
+  function addToInventory(type, n = 1) {
+    inventory[type] = (inventory[type] || 0) + n;
+    inventoryDirty = true;
+    markDirty();
+  }
+  let inventoryDirty = true;
+  const INVENTORY_META = {
+    grass:    { color: '#3d7c3a', label: 'Grass'   },
+    sand:     { color: '#dcc88c', label: 'Sand'    },
+    snow:     { color: '#dcdce6', label: 'Snow'    },
+    dirt:     { color: '#704830', label: 'Dirt'    },
+    stone:    { color: '#777474', label: 'Stone'   },
+    coal:     { color: '#1a1a1f', label: 'Coal'    },
+    iron:     { color: '#9d6938', label: 'Iron'    },
+    gold:     { color: '#d8b338', label: 'Gold'    },
+    bedrock:  { color: '#48484e', label: 'Bedrock' },
+    water:    { color: '#3266aa', label: 'Water'   },
+    lava:     { color: '#f26a18', label: 'Lava'    },
+    tree:     { color: '#2a6b30', label: 'Tree'    },
+    pine:     { color: '#194420', label: 'Pine'    },
+    grass_tuft:{ color: '#3d6b2a', label: 'Tuft'   },
+    rock:     { color: '#5a544c', label: 'Rock'    },
+    rabbit:   { color: '#d8c4a0', label: 'Rabbit'  },
+    deer:     { color: '#9a6840', label: 'Deer'    },
+    bird:     { color: '#454c54', label: 'Bird'    },
+  };
+
+  // One bulk re-upload of the whole terrain texture — way cheaper than thousands
+  // of single-pixel texSubImage2D calls during a big blast.
+  function uploadAllTerrain() {
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, WORLD_W, WORLD_H, 0,
+                  gl.RGBA, gl.UNSIGNED_BYTE, texData);
+  }
+
+  function detonate(targetX, targetY, radius, peakLayers) {
+    const tileR = Math.ceil(radius / TILE);
+    const ctxTx = Math.floor(targetX / TILE);
+    const ctxTy = Math.floor(targetY / TILE);
+    for (let dy = -tileR; dy <= tileR; dy++) {
+      for (let dx = -tileR; dx <= tileR; dx++) {
+        const wtx = ctxTx + dx, wty = ctxTy + dy;
+        const wx = (wtx + 0.5) * TILE, wy = (wty + 0.5) * TILE;
+        const d = Math.hypot(wx - targetX, wy - targetY);
+        if (d > radius) continue;
+        const fall = 1 - d / radius;            // 0 at edge, 1 at center
+        const layers = Math.max(1, Math.round(peakLayers * fall));
+        for (let k = 0; k < layers; k++) {
+          const r = removeVoxelAt(wtx, wty, /*deferGpu=*/true);
+          if (!r) break;
+          if (k === 0) spawnDebris(wx, wy, r.color, r.type, targetX, targetY);
+        }
+      }
+    }
+    uploadAllTerrain();
+    shockwaves.push({ x: targetX, y: targetY, t: 0, life: 0.7, maxR: radius });
+    // Knock entities back / panic.
+    for (const e of entities) {
+      const [dx, dy] = shortestDelta(e.x, e.y, targetX, targetY);
+      const d = Math.hypot(dx, dy);
+      if (d < radius * 1.4) {
+        e.fleeT = 2.5;
+        e.angle = Math.atan2(-dy, -dx);
+        e.state = null;
+      }
+    }
+  }
+
+  // Lugia "Aeroblast": pierces straight through to bedrock at the impact tile,
+  // tapering damage outward. Only legal when the saucer is in orbit.
+  // Antipode of a world point with respect to the player's "north pole" on the
+  // projected sphere. This is where a beam piercing through the planet exits.
+  function antipodeOf(tx, ty) {
+    const wpW = WORLD_W * TILE, wpH = WORLD_H * TILE;
+    let dx = tx - player.x, dy = ty - player.y;
+    // shortest-path delta (matches projectSprite)
+    dx = ((dx + wpW * 1.5) % wpW) - wpW * 0.5;
+    dy = ((dy + wpH * 1.5) % wpH) - wpH * 0.5;
+    const arc = Math.hypot(dx, dy);
+    if (arc < 1e-3) return { x: player.x + R_WORLD * Math.PI, y: player.y };
+    const factor = (Math.PI * R_WORLD - arc) / arc;
+    return { x: player.x - dx * factor, y: player.y - dy * factor };
+  }
+
+  // Carves the entry/exit crater. Returns the new running particle count.
+  function lugiaPierceAt(targetX, targetY, particlesSpawned, particleCap) {
+    const cfg = BEAM_CONFIGS.lugia;
+    const innerR = cfg.radius * 0.55;
+    const outerR = cfg.radius;
+    const tileR = Math.ceil(outerR / TILE);
+    const ctxTx = Math.floor(targetX / TILE);
+    const ctxTy = Math.floor(targetY / TILE);
+    for (let dy = -tileR; dy <= tileR; dy++) {
+      for (let dx = -tileR; dx <= tileR; dx++) {
+        const wtx = ctxTx + dx, wty = ctxTy + dy;
+        const wx = (wtx + 0.5) * TILE, wy = (wty + 0.5) * TILE;
+        const d = Math.hypot(wx - targetX, wy - targetY);
+        if (d > outerR) continue;
+        const wrappedTx = ((wtx % WORLD_W) + WORLD_W) % WORLD_W;
+        const wrappedTy = ((wty % WORLD_H) + WORLD_H) % WORLD_H;
+        const i = wrappedTy * WORLD_W + wrappedTx;
+        const cur = texData[i * 4 + 3];
+        if (d < innerR) {
+          if (cur < 255) {
+            texData[i * 4 + 3] = 255;
+            const layersGone = Math.floor((255 - cur) / 8);
+            for (let k = 0; k < layersGone; k++) {
+              if (particlesSpawned < particleCap && Math.random() < 0.05) {
+                const blk = blockAt(wrappedTx, wrappedTy, Math.floor(cur / 8) + k);
+                spawnDebris(wx, wy, blk.color, blk.type, targetX, targetY);
+                particlesSpawned++;
+              }
+            }
+          }
+        } else {
+          const layers = Math.max(2, Math.round(cfg.pierceLayers *
+                          Math.pow(1 - (d - innerR) / (outerR - innerR), 0.6)));
+          for (let k = 0; k < layers; k++) {
+            const r = removeVoxelAt(wtx, wty, /*deferGpu=*/true);
+            if (!r) break;
+            if (particlesSpawned < particleCap && Math.random() < 0.03) {
+              spawnDebris(wx, wy, r.color, r.type, targetX, targetY);
+              particlesSpawned++;
+            }
+          }
+        }
+      }
+    }
+    return particlesSpawned;
+  }
+
+  function detonateLugia(targetX, targetY) {
+    const cfg = BEAM_CONFIGS.lugia;
+    const innerR = cfg.radius * 0.55;
+    const outerR = cfg.radius;
+    // Beam pierces through the planet — entry crater + exit crater at the antipode.
+    const ant = antipodeOf(targetX, targetY);
+    let particlesSpawned = 0;
+    particlesSpawned = lugiaPierceAt(targetX,  targetY,  particlesSpawned, 600);
+    particlesSpawned = lugiaPierceAt(ant.x,    ant.y,    particlesSpawned, 1000);
+    uploadAllTerrain();
+    markDirty();
+    // Void overlays at BOTH ends so the antipode also goes black-then-lava.
+    voidZones.push({ x: targetX, y: targetY, radius: innerR * 1.05, t: 0,    life: 1.4 });
+    voidZones.push({ x: ant.x,   y: ant.y,   radius: innerR * 1.05, t: 0,    life: 1.4 });
+    // Stacked shockwaves: instant + rolling aftershocks.
+    shockwaves.push({ x: targetX, y: targetY, t:  0.00, life: 1.00, maxR: outerR * 0.55 });
+    shockwaves.push({ x: targetX, y: targetY, t: -0.10, life: 1.10, maxR: outerR * 0.95 });
+    shockwaves.push({ x: targetX, y: targetY, t: -0.30, life: 1.40, maxR: outerR * 1.40 });
+    shockwaves.push({ x: targetX, y: targetY, t: -0.55, life: 1.80, maxR: outerR * 1.85 });
+    shockwaves.push({ x: targetX, y: targetY, t: -0.85, life: 2.20, maxR: outerR * 2.30 });
+    lugiaFlash = { x: targetX, y: targetY, t: 0, life: 0.9 };
+    // Knock entities back across a much larger radius — anything within ~3× range scatters.
+    for (const e of entities) {
+      const [dx, dy] = shortestDelta(e.x, e.y, targetX, targetY);
+      const d = Math.hypot(dx, dy);
+      if (d < outerR * 3) {
+        e.fleeT = 5;
+        e.angle = Math.atan2(-dy, -dx);
+        e.state = null;
+      }
+    }
+  }
+
+  function updateVoidZones(dt) {
+    for (let i = voidZones.length - 1; i >= 0; i--) {
+      voidZones[i].t += dt;
+      if (voidZones[i].t >= voidZones[i].life) voidZones.splice(i, 1);
+    }
+  }
+  function drawVoidZones() {
+    for (const z of voidZones) {
+      const pp = projectSprite(z.x, z.y);
+      if (!pp) continue;
+      const t = z.t / z.life;
+      const alpha = Math.pow(1 - t, 1.5);
+      const r = z.radius * (0.92 + t * 0.18);
+      ctx.setTransform(pp.scale, 0, 0, pp.scale, pp.sx, pp.sy);
+      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+      grad.addColorStop(0,    `rgba(0, 0, 0, ${alpha})`);
+      grad.addColorStop(0.75, `rgba(8, 4, 12, ${alpha * 0.55})`);
+      grad.addColorStop(1,    `rgba(0, 0, 0, 0)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function updateShockwaves(dt) {
+    for (let i = shockwaves.length - 1; i >= 0; i--) {
+      shockwaves[i].t += dt;
+      if (shockwaves[i].t >= shockwaves[i].life) shockwaves.splice(i, 1);
+    }
+  }
+  function drawShockwaves() {
+    for (const s of shockwaves) {
+      const pp = projectSprite(s.x, s.y);
+      if (!pp) continue;
+      const p = Math.max(0, Math.min(1, s.t / s.life));
+      if (p <= 0) continue;                       // staggered shockwave hasn't started yet
+      const eased = 1 - Math.pow(1 - p, 3);    // fast then slow
+      const r = Math.max(0, s.maxR * eased);
+      ctx.setTransform(pp.scale, 0, 0, pp.scale, pp.sx, pp.sy);
+      ctx.lineWidth = 14 * SCALE * (1 - p);
+      ctx.strokeStyle = `rgba(15, 15, 22, ${0.85 * (1 - p)})`;
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.lineWidth = 6 * SCALE * (1 - p);
+      ctx.strokeStyle = `rgba(120, 120, 140, ${0.55 * (1 - p)})`;
+      ctx.beginPath(); ctx.arc(0, 0, r * 0.85, 0, Math.PI * 2); ctx.stroke();
+      // Inner soot disc that fades fast.
+      if (p < 0.45) {
+        ctx.fillStyle = `rgba(0, 0, 0, ${0.55 * (1 - p / 0.45)})`;
+        ctx.beginPath(); ctx.arc(0, 0, r * 0.65, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  }
+
+  // Flying decorations being pulled toward the saucer (uprooted trees etc.).
+  const flyingDecor = [];
+
+  // When deferGpu is true, the caller is responsible for uploading the dirty
+  // rectangle in a single batched texSubImage2D — used by big explosions to
+  // avoid 100k+ GPU syncs in one frame.
+  function removeVoxelAt(tx, ty, deferGpu) {
+    tx = ((tx % WORLD_W) + WORLD_W) % WORLD_W;
+    ty = ((ty % WORLD_H) + WORLD_H) % WORLD_H;
+    const i = ty * WORLD_W + tx;
+    const cur = texData[i * 4 + 3];
+    // Normal digging stops at alpha 240 (= layer 30, lava floor). The top of
+    // the alpha range (>0.95 ≈ alpha 244+) is reserved for Lugia "hole" pierces.
+    if (cur >= 240) return null;
+    const newH = cur + 8;
+    texData[i * 4 + 3] = newH;
+    if (!deferGpu) {
+      const px = new Uint8Array([texData[i*4], texData[i*4+1], texData[i*4+2], newH]);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, tx, ty, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    }
+    markDirty();
+    const layer = Math.floor(cur / 8);
+    const blk = blockAt(tx, ty, layer);
+    // (Inventory is credited only when blocks reach the saucer — flung blocks escape.)
+    // First dig: any decoration on this tile gets uprooted and flies up.
+    if (cur === 0) {
+      const d = decorAt(tx, ty);
+      if (d) {
+        const ox = hash01(tx, ty, 2), oy = hash01(tx, ty, 3);
+        flyingDecor.push({
+          type: d, x: (tx + ox) * TILE, y: (ty + oy) * TILE,
+          vx: (Math.random() - 0.5) * 80, vy: (Math.random() - 0.5) * 80,
+          z: 0, vz: 90, t: 0, life: 1.8,
+          spin: (Math.random() - 0.5) * 6,
+          attracted: true,
+        });
+      }
+    }
+    return { color: blk.color, type: blk.type, tx, ty };
+  }
+
+  // Updated/drawn each frame; fling-on-release handled in the main loop.
+  function updateFlyingDecor(dt) {
+    for (let i = flyingDecor.length - 1; i >= 0; i--) {
+      const f = flyingDecor[i];
+      f.t += dt;
+      if (f.attracted) {
+        const [dx, dy] = shortestDelta(f.x, f.y, player.x, player.y);
+        const d = Math.max(1, Math.hypot(dx, dy));
+        const acc = 320;
+        f.vx += dx / d * acc * dt;
+        f.vy += dy / d * acc * dt;
+        const sp = Math.hypot(f.vx, f.vy);
+        if (sp > 420) { f.vx = f.vx / sp * 420; f.vy = f.vy / sp * 420; }
+        f.vz += 60 * dt;
+        if (d < 18) { addToInventory(f.type === 'grass' ? 'grass_tuft' : f.type); flyingDecor.splice(i, 1); continue; }
+      } else {
+        f.vz -= 240 * dt;
+        f.vx *= Math.pow(0.4, dt);
+        f.vy *= Math.pow(0.4, dt);
+      }
+      f.x += f.vx * dt; f.y += f.vy * dt; f.z += f.vz * dt;
+      if (f.t >= f.life || f.z < -40) flyingDecor.splice(i, 1);
+    }
+  }
+  function drawFlyingDecor() {
+    for (const f of flyingDecor) {
+      const pp = projectSprite(f.x, f.y);
+      if (!pp) continue;
+      ctx.setTransform(pp.scale, 0, 0, pp.scale, pp.sx, pp.sy - f.z);
+      ctx.rotate(f.t * f.spin);
+      const lifeT = Math.min(1, f.t / f.life);
+      ctx.globalAlpha = 1 - lifeT * 0.3;
+      if (f.type === 'tree') {
+        const s = 12 * SCALE;
+        ctx.beginPath(); ctx.arc(0, 0, s, 0, Math.PI * 2);
+        ctx.fillStyle = '#2e6a30'; ctx.fill();
+        ctx.beginPath(); ctx.arc(0, 0, s * 0.55, 0, Math.PI * 2);
+        ctx.fillStyle = '#5fa050'; ctx.fill();
+        ctx.beginPath(); ctx.arc(0, 0, s * 0.13, 0, Math.PI * 2);
+        ctx.fillStyle = '#3a2010'; ctx.fill();
+      } else if (f.type === 'pine') {
+        const s = 12 * SCALE, pts = 8;
+        ctx.beginPath();
+        for (let i = 0; i < pts * 2; i++) {
+          const r = i % 2 === 0 ? s : s * 0.55;
+          const a = i * Math.PI / pts;
+          const px = Math.cos(a) * r, py = Math.sin(a) * r;
+          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fillStyle = '#194420'; ctx.fill();
+      } else if (f.type === 'rock') {
+        const s = 6 * SCALE;
+        ctx.beginPath(); ctx.arc(0, 0, s, 0, Math.PI * 2);
+        ctx.fillStyle = '#5a544c'; ctx.fill();
+      } else if (f.type === 'grass') {
+        const s = 4 * SCALE;
+        ctx.fillStyle = '#3d6b2a';
+        ctx.fillRect(-s, -s, s * 2, s * 2);
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // Voxel particles streaming up the beam toward the saucer.
+  const voxels = [];
+  function spawnVoxel(wx, wy, color, type) {
+    voxels.push({
+      x: wx, y: wy,
+      vx: (Math.random() - 0.5) * 60,
+      vy: (Math.random() - 0.5) * 60,
+      z: 0, vz: 80 + Math.random() * 40,
+      t: 0, life: 1.6,
+      spin: (Math.random() - 0.5) * 8,
+      attracted: true,
+      color, type,
+    });
+  }
+
+  // Block-id mapping for falling debris. Blocks that don't have an override
+  // type just disappear on landing.
+  const BLOCK_FROM_TYPE = {
+    sand: 1,
+    stone: 2, coal: 2, iron: 2, gold: 2, bedrock: 2,
+    dirt: 3, grass: 3,
+    water: 4,
+    snow: 5,
+  };
+  function landAsBlock(v) {
+    const id = BLOCK_FROM_TYPE[v.type];
+    if (!id) return false;
+    const tx = Math.floor(v.x / TILE);
+    const ty = Math.floor(v.y / TILE);
+    setBlock(tx, ty, id);
+    return true;
+  }
+
+  // Explosion debris: blasts outward from the impact, never reaches the saucer,
+  // so it's NOT collected. Bomb + Lugia scatter blocks rather than harvesting them.
+  function spawnDebris(wx, wy, color, type, originX, originY) {
+    const dx = wx - originX, dy = wy - originY;
+    const ang = (dx === 0 && dy === 0)
+      ? Math.random() * Math.PI * 2
+      : Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.5;
+    const sp = 220 + Math.random() * 280;
+    voxels.push({
+      x: wx, y: wy,
+      vx: Math.cos(ang) * sp,
+      vy: Math.sin(ang) * sp,
+      z: 0, vz: 120 + Math.random() * 100,
+      t: 0, life: 1.3 + Math.random() * 0.5,
+      spin: (Math.random() - 0.5) * 14,
+      attracted: false,
+      color, type,
+    });
+  }
+  function updateVoxels(dt) {
+    for (let i = voxels.length - 1; i >= 0; i--) {
+      const v = voxels[i];
+      v.t += dt;
+      if (v.t >= v.life) { voxels.splice(i, 1); continue; }
+      if (v.attracted) {
+        const [dx, dy] = shortestDelta(v.x, v.y, player.x, player.y);
+        const d = Math.max(1, Math.hypot(dx, dy));
+        const acc = 320;
+        v.vx += dx / d * acc * dt;
+        v.vy += dy / d * acc * dt;
+        const sp = Math.hypot(v.vx, v.vy);
+        const maxSp = 420;
+        if (sp > maxSp) { v.vx = v.vx / sp * maxSp; v.vy = v.vy / sp * maxSp; }
+        v.vz += 60 * dt;
+        if (d < 18) {
+          // Absorbed — count it.
+          addToInventory(v.type || 'block');
+          voxels.splice(i, 1); continue;
+        }
+      } else {
+        // Released: gravity-like fall, friction.
+        v.vz -= 220 * dt;
+        v.vx *= Math.pow(0.5, dt);
+        v.vy *= Math.pow(0.5, dt);
+      }
+      v.x += v.vx * dt;
+      v.y += v.vy * dt;
+      v.z += v.vz * dt;
+      // Released voxels land as blocks anywhere they touch ground.
+      if (!v.attracted && v.z <= 0 && v.vz <= 0 && v.t > 0.15) {
+        landAsBlock(v);
+        voxels.splice(i, 1); continue;
+      }
+      if (v.z < -30) { voxels.splice(i, 1); continue; }
+    }
+  }
+  // When the beam releases, blocks already in flight get a tangential fling and
+  // lose their attraction to the saucer.
+  function flingInFlightVoxels() {
+    for (const v of voxels) {
+      if (!v.attracted) continue;
+      v.attracted = false;
+      const ang = Math.random() * Math.PI * 2;
+      const sp = 120 + Math.random() * 180;
+      v.vx += Math.cos(ang) * sp;
+      v.vy += Math.sin(ang) * sp;
+      v.vz = Math.max(40, v.vz);
+    }
+    for (const f of flyingDecor) {
+      if (!f.attracted) continue;
+      f.attracted = false;
+      const ang = Math.random() * Math.PI * 2;
+      const sp = 100 + Math.random() * 140;
+      f.vx += Math.cos(ang) * sp;
+      f.vy += Math.sin(ang) * sp;
+    }
+  }
+  function drawVoxels() {
+    for (const v of voxels) {
+      const pp = projectSprite(v.x, v.y);
+      if (!pp) continue;
+      // Fade in/out a bit.
+      const lifeT = v.t / v.life;
+      const alpha = lifeT < 0.1 ? lifeT * 10 : 1;
+      ctx.setTransform(pp.scale, 0, 0, pp.scale, pp.sx, pp.sy - v.z);
+      ctx.rotate(v.t * v.spin);
+      const s = 6 * SCALE;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = v.color;
+      ctx.fillRect(-s/2, -s/2, s, s);
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-s/2, -s/2, s, s);
+      // Top highlight to read as a 3-D cube.
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.fillRect(-s/2, -s/2, s, s/3);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function setBlock(tx, ty, id) {
+    tx = ((tx % WORLD_W) + WORLD_W) % WORLD_W;
+    ty = ((ty % WORLD_H) + WORLD_H) % WORLD_H;
+    const i = ty * WORLD_W + tx;
+    markDirty();
+    if (overrides[i] === id) return;
+    overrides[i] = id;
+    // Placing a block fills the pit at this tile back to the surface.
+    texData[i*4 + 2] = id;
+    texData[i*4 + 3] = 0;
+    const px = new Uint8Array([texData[i*4], texData[i*4+1], id, 0]);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, tx, ty, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  }
+
+  // --- World queries (CPU side, for collision + decorations) ---
+  function hash01(x, y, salt) {
+    let h = (x | 0) * 374761393 + (y | 0) * 668265263 + (SEED | 0) + (salt | 0) * 2147483647;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+
+  function decorAt(tx, ty) {
+    tx = ((tx % WORLD_W) + WORLD_W) % WORLD_W;
+    ty = ((ty % WORLD_H) + WORLD_H) % WORLD_H;
+    const i = ty * WORLD_W + tx;
+    if (overrides[i]) return null;
+    const e = elev[i], m = moist[i];
+    if (e < 0.46) return null;
+    const r = hash01(tx, ty, 1);
+    if (e < 0.70) {
+      if (m >= 0.45) {
+        if (r < 0.10) return 'tree';
+        if (r < 0.32) return 'grass';
+      } else {
+        if (r < 0.04) return 'tree';
+        if (r < 0.18) return 'grass';
+      }
+      return null;
+    }
+    if (e < 0.82) {
+      if (r < 0.05) return 'pine';
+      if (r < 0.12) return 'rock';
+      return null;
+    }
+    if (r < 0.03) return 'pine';
+    if (r < 0.06) return 'rock';
+    return null;
+  }
+
+  function biomeAt(tx, ty) {
+    tx = ((tx % WORLD_W) + WORLD_W) % WORLD_W;
+    ty = ((ty % WORLD_H) + WORLD_H) % WORLD_H;
+    const i = ty * WORLD_W + tx;
+    if (overrides[i]) return BLOCK_DEFS[overrides[i]].biome;
+    const e = elev[i], m = moist[i];
+    if (e < 0.35) return 'water_deep';
+    if (e < 0.42) return 'water';
+    if (e < 0.46) return 'sand';
+    if (e < 0.70) return m < 0.45 ? 'grass_dry' : 'grass_lush';
+    if (e < 0.82) return 'hills';
+    return 'snow';
+  }
+
+  function passable(tx, ty) {
+    tx = ((tx % WORLD_W) + WORLD_W) % WORLD_W;
+    ty = ((ty % WORLD_H) + WORLD_H) % WORLD_H;
+    const i = ty * WORLD_W + tx;
+    if (overrides[i]) return BLOCK_DEFS[overrides[i]].passable;
+    return elev[i] >= 0.42;
+  }
+
+  // --- Player ---
+  let spawnX = WORLD_W / 2, spawnY = WORLD_H / 2;
+  for (let r = 0; r < 80; r++) {
+    let found = false;
+    for (let dy = -r; dy <= r && !found; dy++)
+      for (let dx = -r; dx <= r && !found; dx++) {
+        const tx = (WORLD_W >> 1) + dx, ty = (WORLD_H >> 1) + dy;
+        if (passable(tx, ty)) { spawnX = tx + 0.5; spawnY = ty + 0.5; found = true; }
+      }
+    if (found) break;
+  }
+  const player = {
+    x: spawnX * TILE, y: spawnY * TILE,
+    r: 10 * SCALE, speed: 90 * SCALE,
+  };
+
+  const prints = [];
+  const PRINT_LIFE = 8;
+  const PRINT_SPACING = 18 * SCALE;
+  let distSinceStep = 0, stepSide = 1;
+
+  // --- Entities (wandering creatures) ---
+  const ENTITY_DEFS = {
+    rabbit: { speed: 90,  sprintMult: 1.9, bodyR: 4 * SCALE,
+              body: '#d8c4a0', accent: '#5a3820', fearRadius: 240,
+              idleMin: 1.5, idleMax: 3.5, weight: 4 },
+    deer:   { speed: 130, sprintMult: 1.6, bodyR: 7 * SCALE,
+              body: '#9a6840', accent: '#3a2010', fearRadius: 360,
+              idleMin: 2.0, idleMax: 5.0, weight: 1 },
+    bird:   { speed: 110, sprintMult: 1.3, bodyR: 3 * SCALE,
+              body: '#454c54', accent: '#1a1f24', fearRadius: 180,
+              idleMin: 0.6, idleMax: 1.6, weight: 2, flying: true },
+  };
+  const entities = [];
+  const ENTITY_CAP = 36;
+  const SPAWN_NEAR = 1100;
+  const SPAWN_FAR  = 1800;
+  const DESPAWN    = 2500;
+  const ENTITY_TYPE_BAG = (() => {
+    const out = [];
+    for (const t of Object.keys(ENTITY_DEFS))
+      for (let i = 0; i < ENTITY_DEFS[t].weight; i++) out.push(t);
+    return out;
+  })();
+
+  function shortestDelta(ax, ay, bx, by) {
+    const wpW = WORLD_W * TILE, wpH = WORLD_H * TILE;
+    let dx = bx - ax, dy = by - ay;
+    dx = ((dx + wpW * 1.5) % wpW) - wpW * 0.5;
+    dy = ((dy + wpH * 1.5) % wpH) - wpH * 0.5;
+    return [dx, dy];
+  }
+
+  function spawnEntity() {
+    const ang = Math.random() * Math.PI * 2;
+    const dist = SPAWN_NEAR + Math.random() * (SPAWN_FAR - SPAWN_NEAR);
+    const wx = player.x + Math.cos(ang) * dist;
+    const wy = player.y + Math.sin(ang) * dist;
+    const type = ENTITY_TYPE_BAG[Math.floor(Math.random() * ENTITY_TYPE_BAG.length)];
+    const def = ENTITY_DEFS[type];
+    if (!def.flying && !passable(Math.floor(wx / TILE), Math.floor(wy / TILE))) return;
+    entities.push({
+      type, x: wx, y: wy,
+      angle: Math.random() * Math.PI * 2,
+      target: null, idleT: 0, fleeT: 0,
+      bobPhase: Math.random() * Math.PI * 2,
+    });
+  }
+
+  function updateEntities(dt) {
+    if (entities.length < ENTITY_CAP && Math.random() < 0.5) spawnEntity();
+    const beamActive = beaming && character === 'saucer'
+                    && mode === 'flying' && transition === 'none' && beamTarget;
+    for (let i = entities.length - 1; i >= 0; i--) {
+      const e = entities[i];
+      const def = ENTITY_DEFS[e.type];
+      const [dxp, dyp] = shortestDelta(e.x, e.y, player.x, player.y);
+      const distP = Math.hypot(dxp, dyp);
+      if (distP > DESPAWN) { entities.splice(i, 1); continue; }
+
+      // Distance from entity to where the beam is aimed (mouse-driven).
+      const beamX = beamActive ? beamTarget.x : player.x;
+      const beamY = beamActive ? beamTarget.y : player.y;
+      const [dxb, dyb] = shortestDelta(e.x, e.y, beamX, beamY);
+      const distBeam = Math.hypot(dxb, dyb);
+
+      // Abduction state machine.
+      if (e.state === 'abducting') {
+        e.abductT = (e.abductT || 0) + dt;
+        if (!beamActive) {
+          // Beam released — drop the creature, panic-flee.
+          e.state = null;
+          e.fleeT = 1.5;
+          e.angle = Math.atan2(-dyp, -dxp) + (Math.random() - 0.5) * 0.6;
+        } else {
+          // Pull toward the saucer.
+          const dist = Math.max(1, distP);
+          const pull = (260 + e.abductT * 220) * dt;
+          e.x += dxp / dist * pull;
+          e.y += dyp / dist * pull;
+          if (e.abductT >= ABDUCT_DUR || distP < 12) {
+            abductedCount++;
+            addToInventory(e.type);
+            entities.splice(i, 1);
+            markDirty();
+            continue;
+          }
+          continue; // skip wander/flee while being abducted
+        }
+      } else if (beamActive && !BEAM_CONFIGS[beamType].oneShot
+                 && distBeam < BEAM_CONFIGS[beamType].radius) {
+        e.state = 'abducting';
+        e.abductT = 0;
+        continue;
+      }
+
+      // Flee if player is too close.
+      if (distP < def.fearRadius) {
+        e.fleeT = 1.0 + Math.random() * 0.6;
+        e.angle = Math.atan2(-dyp, -dxp);
+        e.target = null;
+      } else if (e.fleeT > 0) e.fleeT -= dt;
+      // Wander: pick a new local target when idle.
+      if (!e.target && e.fleeT <= 0) {
+        e.idleT -= dt;
+        if (e.idleT <= 0) {
+          const a = Math.random() * Math.PI * 2;
+          const d = 80 + Math.random() * 220;
+          e.target = { x: e.x + Math.cos(a) * d, y: e.y + Math.sin(a) * d };
+          e.angle = a;
+          e.idleT = def.idleMin + Math.random() * (def.idleMax - def.idleMin);
+        }
+      }
+      let mvx = 0, mvy = 0;
+      if (e.fleeT > 0) {
+        mvx = Math.cos(e.angle); mvy = Math.sin(e.angle);
+      } else if (e.target) {
+        const [dx, dy] = shortestDelta(e.x, e.y, e.target.x, e.target.y);
+        const d = Math.hypot(dx, dy);
+        if (d < 6) { e.target = null; }
+        else { mvx = dx / d; mvy = dy / d; e.angle = Math.atan2(dy, dx); }
+      }
+      if (mvx || mvy) {
+        const sp = def.speed * (e.fleeT > 0 ? def.sprintMult : 1);
+        const step = sp * dt;
+        const nx = e.x + mvx * step;
+        const ny = e.y + mvy * step;
+        if (def.flying || passable(Math.floor(nx / TILE), Math.floor(e.y / TILE))) e.x = nx;
+        else e.target = null;
+        if (def.flying || passable(Math.floor(e.x / TILE), Math.floor(ny / TILE))) e.y = ny;
+        else e.target = null;
+      }
+    }
+  }
+
+  function drawEntities() {
+    for (const e of entities) {
+      const pp = projectSprite(e.x, e.y);
+      if (!pp) continue;
+      const def = ENTITY_DEFS[e.type];
+      const r = def.bodyR;
+      // Abducting → lift toward the saucer body, shrink, spin, glow.
+      if (e.state === 'abducting') {
+        const phase = Math.min(1, e.abductT / ABDUCT_DUR);
+        const liftPx = (1 - Math.min(zoom, 1)) * 220 * phase + 80 * phase;
+        const sScale = pp.scale * (1 - phase * 0.7);
+        ctx.setTransform(sScale, 0, 0, sScale, pp.sx, pp.sy - liftPx);
+        ctx.rotate(elapsed * 8 + phase * Math.PI * 6);
+        // Sucking-up glow.
+        ctx.beginPath();
+        ctx.arc(0, 0, r * (1.4 + phase * 0.6), 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(170, 255, 180, ${0.6 * (1 - phase * 0.5)})`;
+        ctx.fill();
+      } else {
+        ctx.setTransform(pp.scale, 0, 0, pp.scale, pp.sx, pp.sy);
+        ctx.rotate(e.angle);
+        // Shadow.
+        ctx.beginPath();
+        ctx.ellipse(0, r * 0.4, r * 1.1, r * 0.45, 0, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0,0,0,0.32)'; ctx.fill();
+      }
+      if (e.type === 'rabbit') {
+        ctx.fillStyle = def.body;
+        ctx.strokeStyle = '#5a4838'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.ellipse(0, 0, r * 1.1, r * 0.7, 0, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(r * 0.7, 0, r * 0.55, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+        // Ears.
+        ctx.fillStyle = def.accent;
+        ctx.beginPath(); ctx.ellipse(r * 0.95, -r * 0.4, r * 0.16, r * 0.45, 0.2, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(r * 0.95,  r * 0.4, r * 0.16, r * 0.45, -0.2, 0, Math.PI * 2); ctx.fill();
+        // Nose.
+        ctx.beginPath(); ctx.arc(r * 1.2, 0, r * 0.10, 0, Math.PI * 2);
+        ctx.fillStyle = '#3a2010'; ctx.fill();
+      } else if (e.type === 'deer') {
+        ctx.fillStyle = def.body;
+        ctx.strokeStyle = '#3a2010'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.ellipse(0, 0, r * 1.4, r * 0.7, 0, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+        // Spots.
+        ctx.fillStyle = '#cba078';
+        ctx.beginPath(); ctx.arc(-r * 0.4, -r * 0.25, r * 0.12, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(-r * 0.6,  r * 0.30, r * 0.12, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc( r * 0.05, -r * 0.30, r * 0.10, 0, Math.PI * 2); ctx.fill();
+        // Head.
+        ctx.beginPath(); ctx.arc(r * 1.05, -r * 0.1, r * 0.45, 0, Math.PI * 2);
+        ctx.fillStyle = def.body; ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(r * 1.4, -r * 0.1, r * 0.18, 0, Math.PI * 2);
+        ctx.fillStyle = '#705038'; ctx.fill();
+        // Antlers.
+        ctx.strokeStyle = def.accent; ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(r * 1.0, -r * 0.4); ctx.lineTo(r * 1.15, -r * 0.85);
+        ctx.moveTo(r * 1.1, -r * 0.55); ctx.lineTo(r * 0.92, -r * 0.78);
+        ctx.stroke();
+      } else if (e.type === 'bird') {
+        const flap = Math.sin(elapsed * 18 + e.bobPhase) * 0.4 + 1.0;
+        // Body — small dark oval.
+        ctx.fillStyle = def.body;
+        ctx.beginPath(); ctx.ellipse(0, 0, r * 1.2, r * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Wings (flap).
+        ctx.fillStyle = def.accent;
+        ctx.beginPath(); ctx.ellipse(0, -r * flap, r * 1.1, r * 0.25, 0.2, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(0,  r * flap, r * 1.1, r * 0.25, -0.2, 0, Math.PI * 2); ctx.fill();
+        // Beak.
+        ctx.fillStyle = '#cc8030';
+        ctx.beginPath();
+        ctx.moveTo(r * 1.3, 0);
+        ctx.lineTo(r * 1.0, -r * 0.18);
+        ctx.lineTo(r * 1.0,  r * 0.18);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
+
+  let lastBiome = biomeAt(Math.floor(player.x / TILE), Math.floor(player.y / TILE));
+  let jumpT = 0;
+  const JUMP_DUR = 0.28;
+  const JUMP_HEIGHT = 9 * SCALE;
+
+  // --- Input ---
+  const keys = new Set();
+  addEventListener('keydown', e => keys.add(e.key.toLowerCase()));
+  addEventListener('keyup',   e => keys.delete(e.key.toLowerCase()));
+
+  const show = {
+    tree: true, pine: true, grass: true, rock: true, prints: true, entities: true, editor: false,
+    wind: true, daycycle: true, light: true, vignette: true,
+  };
+  let activeBlock = 1;
+
+  // Weather state. `weatherMode` is 'auto' or one of the named presets;
+  // when 'auto', the world drifts between presets on its own. Per-frame the
+  // shader receives smoothly-eased `clouds`/`wet`/`flash` uniforms.
+  let weatherMode = 'clear';
+  let currentWeather = 'clear';
+  let weatherT = 0;
+  let weatherTimer = 0;
+  let cloudsLevel = 0;       // current cloud cover 0..1 (eased)
+  let wetLevel = 0;          // current wetness 0..1 (eased)
+  let flashLevel = 0;        // lightning flash decay
+  let nextStrike = 99;       // seconds until next lightning bolt
+  const rainDrops = [];      // {sx, sy, vy, len}
+
+  document.getElementById('weather-sel').addEventListener('change', e => {
+    weatherMode = e.target.value;
+    if (weatherMode !== 'auto') currentWeather = weatherMode;
+  });
+
+  const WEATHER_PRESETS = {
+    clear:  { clouds: 0.0,  wet: 0.0, rain: 0,    storm: false },
+    cloudy: { clouds: 0.55, wet: 0.0, rain: 0,    storm: false },
+    rain:   { clouds: 0.85, wet: 0.7, rain: 0.6,  storm: false },
+    storm:  { clouds: 1.00, wet: 0.9, rain: 1.0,  storm: true  },
+  };
+  // Build the block palette from BLOCK_DEFS.
+  const paletteEl = document.getElementById('palette');
+  for (const [id, def] of Object.entries(BLOCK_DEFS)) {
+    const sw = document.createElement('div');
+    sw.className = 'swatch' + (Number(id) === activeBlock ? ' active' : '');
+    sw.style.background = def.swatch;
+    sw.title = def.name;
+    sw.dataset.id = id;
+    sw.addEventListener('click', () => {
+      activeBlock = Number(id);
+      for (const el of paletteEl.querySelectorAll('.swatch')) el.classList.remove('active');
+      sw.classList.add('active');
+    });
+    paletteEl.appendChild(sw);
+  }
+  // Number keys 1-6 select blocks while editor is on.
+  addEventListener('keydown', e => {
+    if (e.target && /input|select|textarea/i.test(e.target.tagName)) return;
+    if (show.editor) {
+      const n = parseInt(e.key, 10);
+      if (n >= 1 && n <= Object.keys(BLOCK_DEFS).length) {
+        activeBlock = n;
+        const els = paletteEl.querySelectorAll('.swatch');
+        for (const el of els) el.classList.remove('active');
+        els[n - 1]?.classList.add('active');
+        return;
+      }
+    }
+    // Q/W/E/R switch the beam type when the saucer is the active character.
+    const k = e.key.toLowerCase();
+    const map = { q: 'wide', w: 'concentrated', e: 'bomb', r: 'lugia' };
+    if (map[k] && character === 'saucer') setBeamType(map[k]);
+  });
+
+  // Triggered by either keyboard or mouse. Routes to the right weapon path.
+  function fireWeapon() {
+    if (character !== 'saucer' || mode !== 'flying' || transition !== 'none') return;
+    const cfg = BEAM_CONFIGS[beamType];
+    if (cfg.needsOrbit && zoom > ORBIT_ZOOM_MAX) return;          // Lugia gated to orbit.
+    if (beamType === 'bomb') {
+      if (bombCooldown > 0) return;
+      const u = mouse.inside ? unprojectMouse(mouse.x, mouse.y) : null;
+      const tx = u ? u.wx : player.x, ty = u ? u.wy : player.y;
+      detonate(tx, ty, cfg.radius, cfg.blastLayers);
+      bombCooldown = 0.9;
+    } else if (beamType === 'lugia') {
+      if (bombCooldown > 0) return;
+      const u = mouse.inside ? unprojectMouse(mouse.x, mouse.y) : null;
+      const tx = u ? u.wx : player.x, ty = u ? u.wy : player.y;
+      detonateLugia(tx, ty);
+      bombCooldown = cfg.cooldown;
+    } else {
+      beaming = true;
+    }
+  }
+
+  function setBeamType(t) {
+    if (!BEAM_CONFIGS[t]) return;
+    beamType = t;
+    if (BEAM_CONFIGS[t].oneShot) beaming = false;
+    for (const el of document.querySelectorAll('#beam-modes .beam-mode')) {
+      el.classList.toggle('active', el.dataset.type === t);
+    }
+  }
+  for (const el of document.querySelectorAll('#beam-modes .beam-mode')) {
+    el.addEventListener('click', () => setBeamType(el.dataset.type));
+  }
+  const devEl = document.getElementById('dev');
+  devEl.addEventListener('change', e => {
+    const t = e.target;
+    if (t && t.dataset && t.dataset.toggle) show[t.dataset.toggle] = t.checked;
+  });
+  const hudEl = document.getElementById('hud');
+  const fpsEl = document.getElementById('fps');
+  const abductedEl = document.getElementById('abducted');
+  const inventoryEl = document.getElementById('inventory');
+
+  // Zoom state (1.0 = natural). Wheel adjusts; slider mirrors.
+  let character = 'saucer';
+  let mode = 'flying';
+  let ship = null;
+  let hasLeftShip = false;
+  let transition = 'none';
+  let transitionT = 0;
+  let playerAngle = 0;
+  const dust = [];
+  const LAND_DUR = 0.85;
+  const TAKEOFF_DUR = 0.85;
+  // Abduction beam.
+  let beaming = false;
+  let lastBeamActive = false;
+  let abductedCount = 0;
+  let beamTarget = null;     // {x, y} world coord — follows the mouse while beaming.
+  let beamType = 'wide';     // 'wide' | 'concentrated' | 'bomb'
+  let bombCooldown = 0;
+  const BEAM_CONFIGS = {
+    wide:         { radius: 220, voxelsPerSec: 18,  topHalfWMul: 0.55,
+                    coreColor: '#9fff9f', edgeColor: '#3aa84a', oneShot: false },
+    concentrated: { radius: 70,  voxelsPerSec: 110, topHalfWMul: 0.30,
+                    coreColor: '#e6ffd8', edgeColor: '#22ff44', oneShot: false },
+    bomb:         { radius: 320, oneShot: true, blastLayers: 6,
+                    coreColor: '#0a0a12', edgeColor: '#3a3a48' },
+    lugia:        { radius: 1100, oneShot: true, cooldown: 3.5,
+                    pierceLayers: 32, needsOrbit: true,
+                    coreColor: '#eaf9ff', edgeColor: '#7fdfff' },
+  };
+  const ORBIT_ZOOM_MAX = 0.5;
+  let lugiaFlash = null;     // {x, y, t, life} — bright impact + beam trail visual
+  const ABDUCT_DUR = 1.6;
+  let voxelAccum = 0;
+  // Bomb shockwaves: expanding rings drawn in world space.
+  const shockwaves = [];
+  // Void overlays: black discs that fade to expose what's underneath.
+  const voidZones = [];
+
+  let zoom = 1.0;
+  const ZOOM_MIN_DOT = 0.1, ZOOM_MIN_SAUCER = 0.03, ZOOM_MAX = 2.5;
+  const zoomMin = () => (character === 'saucer' && mode === 'flying') ? ZOOM_MIN_SAUCER : ZOOM_MIN_DOT;
+  // Sphere world radius — must match the shader's R_w.
+  const R_WORLD = TILE * WORLD_W / Math.PI;
+  const HALF_PI = Math.PI / 2;
+
+  // Orthographic projection of a world-pixel onto the screen sphere centered on player.
+  // Returns null if the point is on the back hemisphere or off-screen.
+  function projectSprite(wx, wy) {
+    const wpW = WORLD_W * TILE, wpH = WORLD_H * TILE;
+    let dx = wx - player.x;
+    let dy = wy - player.y;
+    // Shortest-path wrap so objects on the other side of the seam project nearby.
+    dx = ((dx + wpW * 1.5) % wpW) - wpW * 0.5;
+    dy = ((dy + wpH * 1.5) % wpH) - wpH * 0.5;
+    const arc = Math.hypot(dx, dy);
+    if (arc > R_WORLD * HALF_PI) return null;
+    const angle = arc / R_WORLD;
+    const sinA = Math.sin(angle);
+    const cosA = Math.cos(angle);
+    const Rs = R_WORLD * zoom;
+    const dirX = arc > 1e-6 ? dx / arc : 0;
+    const dirY = arc > 1e-6 ? dy / arc : 0;
+    const sx = game.width  / 2 + dirX * sinA * Rs;
+    const sy = game.height / 2 + dirY * sinA * Rs;
+    if (sx < -80 || sy < -80 || sx > game.width + 80 || sy > game.height + 80) return null;
+    return { sx, sy, scale: zoom * cosA };
+  }
+
+  // Inverse: screen pixel → world pixel (or null if off-globe).
+  function unprojectMouse(mx, my) {
+    const Rs = R_WORLD * zoom;
+    const sx = (mx - game.width  / 2) / Rs;
+    const sy = (my - game.height / 2) / Rs;
+    const r2 = sx * sx + sy * sy;
+    if (r2 >= 1) return null;
+    const len = Math.sqrt(r2);
+    if (len < 1e-9) return { wx: player.x, wy: player.y };
+    const angle = Math.asin(Math.min(1, len));
+    const arc = angle * R_WORLD;
+    return { wx: player.x + (sx / len) * arc, wy: player.y + (sy / len) * arc };
+  }
+  const zoomSlider = document.getElementById('zoom-slider');
+  zoomSlider.min = String(zoomMin());
+  zoomSlider.addEventListener('input', () => { zoom = parseFloat(zoomSlider.value); });
+  addEventListener('wheel', e => {
+    zoom = Math.max(zoomMin(), Math.min(ZOOM_MAX, zoom * Math.exp(-e.deltaY * 0.001)));
+    zoomSlider.value = zoom;
+    e.preventDefault();
+  }, { passive: false });
+
+  const mouse = { x: 0, y: 0, down: false, inside: false };
+  game.addEventListener('mousemove', e => {
+    const r = game.getBoundingClientRect();
+    mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top;
+    mouse.inside = true;
+  });
+  game.addEventListener('mouseleave', () => { mouse.inside = false; mouse.down = false; });
+  game.addEventListener('mousedown', () => {
+    mouse.down = true;
+    if (show.editor) return;
+    fireWeapon();
+  });
+  game.addEventListener('mouseup', () => {
+    mouse.down = false;
+    if (!keys.has('b')) beaming = false;
+  });
+  game.addEventListener('contextmenu', e => e.preventDefault());
+  addEventListener('keydown', e => {
+    if (e.key === '`') {
+      devEl.classList.toggle('hidden');
+      hudEl.classList.toggle('hidden');
+    }
+    if (e.key === 'Escape') closeSettings();
+  });
+
+  // --- Settings dialog ---
+  const settingsBg = document.getElementById('settings-bg');
+  const mapCanvas  = document.getElementById('map');
+  const mapMeta    = document.getElementById('map-meta');
+  const mapCtx     = mapCanvas.getContext('2d');
+
+  // Cache the biome render — it's the expensive bit. Player marker is redrawn
+  // every frame on top so it stays current as you fly around.
+  const mapBase = document.createElement('canvas');
+  mapBase.width = 256; mapBase.height = 256;
+  const mapBaseCtx = mapBase.getContext('2d');
+
+  function renderMapBase() {
+    const W = mapBase.width, H = mapBase.height;
+    const img = mapBaseCtx.createImageData(W, H);
+    const buf = new Uint32Array(img.data.buffer);
+    for (let y = 0; y < H; y++) {
+      const ty = Math.floor(y * WORLD_H / H);
+      for (let x = 0; x < W; x++) {
+        const tx = Math.floor(x * WORLD_W / W);
+        const i = ty * WORLD_W + tx;
+        const e = elev[i], m = moist[i];
+        const ov = texData[i * 4 + 2];
+        let r, g, b;
+        if (ov)                   {
+          if      (ov === 1)      { r = 220; g = 200; b = 140; }
+          else if (ov === 2)      { r = 121; g = 118; b = 115; }
+          else if (ov === 3)      { r = 110; g = 80;  b = 58;  }
+          else if (ov === 4)      { r = 50;  g = 100; b = 170; }
+          else if (ov === 5)      { r = 220; g = 220; b = 230; }
+          else                    { r = 168; g = 144; b = 112; }
+        }
+        else if (e < 0.35)        { r = 30;  g = 60;  b = 120; }
+        else if (e < 0.42)        { r = 50;  g = 100; b = 170; }
+        else if (e < 0.46)        { r = 220; g = 200; b = 140; }
+        else if (e < 0.70)        {
+          if (m < 0.45)           { r = 140; g = 170; b = 80;  }
+          else                    { r = 70;  g = 130; b = 60;  }
+        }
+        else if (e < 0.82)        { r = 90;  g = 80;  b = 60;  }
+        else                      { r = 220; g = 220; b = 230; }
+        // Holes punched by Lugia render as space; other dug tiles dim significantly.
+        const dug = texData[i * 4 + 3];
+        if (dug > 240) {
+          r = 4; g = 5; b = 12;
+        } else if (dug > 0) {
+          const f = 1 - (dug / 255) * 0.85;
+          r = Math.floor(r * f); g = Math.floor(g * f); b = Math.floor(b * f);
+        }
+        buf[y * W + x] = (255 << 24) | (b << 16) | (g << 8) | r;
+      }
+    }
+    mapBaseCtx.putImageData(img, 0, 0);
+  }
+
+  function renderMapOverlay() {
+    const W = mapCanvas.width, H = mapCanvas.height;
+    mapCtx.drawImage(mapBase, 0, 0);
+    const wrappedTx = (((player.x / TILE) % WORLD_W) + WORLD_W) % WORLD_W;
+    const wrappedTy = (((player.y / TILE) % WORLD_H) + WORLD_H) % WORLD_H;
+    const px = Math.floor(wrappedTx / WORLD_W * W);
+    const py = Math.floor(wrappedTy / WORLD_H * H);
+    mapCtx.fillStyle = '#fff';
+    mapCtx.strokeStyle = '#000';
+    mapCtx.lineWidth = 2;
+    mapCtx.beginPath();
+    mapCtx.arc(px, py, 3, 0, Math.PI * 2);
+    mapCtx.fill();
+    mapCtx.stroke();
+  }
+
+  function renderMap() { renderMapBase(); renderMapOverlay(); }
+
+  function openSettings() {
+    // Refresh the cached biome layer to capture any blocks placed / craters dug
+    // since the dialog was last open.
+    renderMapBase();
+    renderMapOverlay();
+    mapMeta.textContent = `seed ${SEED} · ${WORLD_W}×${WORLD_H} tiles`;
+    document.getElementById('gen-seed').value = SEED;
+    document.getElementById('gen-size').value = String(WORLD_W);
+    settingsBg.classList.add('open');
+  }
+  function closeSettings() { settingsBg.classList.remove('open'); }
+
+  document.getElementById('open-settings').addEventListener('click', openSettings);
+  document.getElementById('close-settings').addEventListener('click', closeSettings);
+  settingsBg.addEventListener('click', e => { if (e.target === settingsBg) closeSettings(); });
+
+  function spawnDustBurst(wx, wy) {
+    for (let i = 0; i < 16; i++) {
+      const ang = (i / 16) * Math.PI * 2 + Math.random() * 0.4;
+      const v = 70 + Math.random() * 60;
+      dust.push({
+        x: wx, y: wy,
+        vx: Math.cos(ang) * v, vy: Math.sin(ang) * v,
+        t: 0, life: 0.9 + Math.random() * 0.3,
+      });
+    }
+  }
+  document.getElementById('character').addEventListener('change', e => {
+    character = e.target.value;
+    mode = 'flying'; ship = null; hasLeftShip = false;
+    transition = 'none'; transitionT = 0;
+    zoomSlider.min = String(zoomMin());
+    if (zoom < zoomMin()) {
+      zoom = zoomMin();
+      zoomSlider.value = zoom;
+    }
+  });
+
+  // Space (or E) starts a landing.
+  addEventListener('keydown', e => {
+    if (character !== 'saucer') return;
+    if (e.target && /input|select|textarea/i.test(e.target.tagName)) return;
+    if (e.key === ' ' || e.key.toLowerCase() === 'e') {
+      if (mode === 'flying' && transition === 'none') {
+        transition = 'landing';
+        transitionT = 0;
+        ship = { x: player.x, y: player.y };
+        hasLeftShip = false;
+        e.preventDefault();
+      }
+    }
+    // B: hold to fire continuous beam; bomb/lugia = single-shot per press.
+    if (e.key.toLowerCase() === 'b') {
+      if (mode === 'flying' && transition === 'none') {
+        fireWeapon();
+        e.preventDefault();
+      }
+    }
+  });
+  addEventListener('keyup', e => {
+    if (e.key.toLowerCase() === 'b' && !mouse.down) beaming = false;
+  });
+
+  function findSpawn() {
+    let sx = WORLD_W / 2, sy = WORLD_H / 2;
+    for (let r = 0; r < 80; r++) {
+      for (let dy = -r; dy <= r; dy++)
+        for (let dx = -r; dx <= r; dx++) {
+          const tx = (WORLD_W >> 1) + dx, ty = (WORLD_H >> 1) + dy;
+          if (passable(tx, ty)) return [tx + 0.5, ty + 0.5];
+        }
+    }
+    return [sx, sy];
+  }
+
+  function regenerateWorld(seed, size) {
+    SEED = seed | 0;
+    WORLD_W = size;
+    WORLD_H = size;
+    rand = rng(SEED);
+    buildTerrain();
+    // Reallocate the GPU texture (size may have changed).
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, WORLD_W, WORLD_H, 0,
+                  gl.RGBA, gl.UNSIGNED_BYTE, texData);
+    gl.uniform2f(uni.worldSize, WORLD_W, WORLD_H);
+    // Reset player to a fresh spawn, clear footprints.
+    const [sx, sy] = findSpawn();
+    player.x = sx * TILE;
+    player.y = sy * TILE;
+    prints.length = 0;
+    distSinceStep = 0;
+    lastBiome = biomeAt(Math.floor(sx), Math.floor(sy));
+    renderMap();
+    mapMeta.textContent = `seed ${SEED} · ${WORLD_W}×${WORLD_H} tiles`;
+  }
+
+  document.getElementById('generate-world').addEventListener('click', () => {
+    const seedInput = document.getElementById('gen-seed');
+    const sizeSel   = document.getElementById('gen-size');
+    const seed = seedInput.value !== '' ? parseInt(seedInput.value, 10)
+                                         : Math.floor(Math.random() * 1e9);
+    const size = parseInt(sizeSel.value, 10);
+    regenerateWorld(seed, size);
+    seedInput.value = SEED;
+  });
+
+  // Click the minimap to teleport — snaps to the nearest passable tile.
+  mapCanvas.addEventListener('click', e => {
+    const r = mapCanvas.getBoundingClientRect();
+    let tx = Math.floor((e.clientX - r.left) / r.width  * WORLD_W);
+    let ty = Math.floor((e.clientY - r.top)  / r.height * WORLD_H);
+    if (!passable(tx, ty)) {
+      outer: for (let R = 1; R < 60; R++) {
+        for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+          if (Math.abs(dx) !== R && Math.abs(dy) !== R) continue;
+          const x = tx + dx, y = ty + dy;
+          if (passable(x, y)) { tx = x; ty = y; break outer; }
+        }
+      }
+    }
+    player.x = (tx + 0.5) * TILE;
+    player.y = (ty + 0.5) * TILE;
+    prints.length = 0;
+    distSinceStep = 0;
+    lastBiome = biomeAt(tx, ty);
+    renderMap();
+  });
+
+  // --- Persistence (localStorage) ---
+  const SAVE_KEY = 'freeworld:state:v1';
+
+  function snapshotForSave() {
+    const placed = [];
+    for (let i = 0; i < overrides.length; i++) {
+      if (overrides[i]) {
+        const tx = i % WORLD_W;
+        const ty = (i - tx) / WORLD_W;
+        placed.push([tx, ty, overrides[i]]);
+      }
+    }
+    const dug = [];
+    for (let i = 0; i < WORLD_W * WORLD_H; i++) {
+      const a = texData[i * 4 + 3];
+      if (a) {
+        const tx = i % WORLD_W;
+        const ty = (i - tx) / WORLD_W;
+        dug.push([tx, ty, a]);
+      }
+    }
+    return {
+      v: 1, seed: SEED, size: WORLD_W,
+      player: { x: player.x, y: player.y },
+      blocks: placed,
+      heights: dug,
+      abducted: abductedCount,
+      inventory: { ...inventory },
+    };
+  }
+
+  function saveToLocalStorage() {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(snapshotForSave())); }
+    catch (e) { console.warn('save failed', e); }
+  }
+
+  function loadFromLocalStorage() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return false;
+      const data = JSON.parse(raw);
+      if (!data || data.v !== 1) return false;
+      regenerateWorld(data.seed | 0, data.size | 1024);
+      for (const [tx, ty, id] of data.blocks) setBlock(tx, ty, id);
+      if (Array.isArray(data.heights) && data.heights.length) {
+        for (const [tx, ty, h] of data.heights) {
+          const i = ty * WORLD_W + tx;
+          texData[i * 4 + 3] = h;
+        }
+        // One bulk re-upload is cheaper than thousands of texSubImage2D calls.
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, WORLD_W, WORLD_H, 0,
+                      gl.RGBA, gl.UNSIGNED_BYTE, texData);
+      }
+      if (data.player) {
+        player.x = data.player.x;
+        player.y = data.player.y;
+      }
+      if (typeof data.abducted === 'number') abductedCount = data.abducted;
+      if (data.inventory) {
+        for (const k of Object.keys(inventory)) delete inventory[k];
+        Object.assign(inventory, data.inventory);
+        inventoryDirty = true;
+      }
+      saveDirty = false;
+      return true;
+    } catch (e) { console.warn('load failed', e); return false; }
+  }
+
+  // Auto-save every 3s if anything's changed.
+  setInterval(() => { if (saveDirty) { saveToLocalStorage(); saveDirty = false; } }, 3000);
+  // Save on page unload too.
+  addEventListener('beforeunload', () => { if (saveDirty) saveToLocalStorage(); });
+
+  document.getElementById('clear-save').addEventListener('click', () => {
+    if (!confirm('Clear saved world? Current session stays until you reload.')) return;
+    try { localStorage.removeItem(SAVE_KEY); saveDirty = false; }
+    catch (e) {}
+  });
+
+  document.getElementById('export-world').addEventListener('click', () => {
+    const placed = [];
+    for (let i = 0; i < overrides.length; i++) {
+      if (overrides[i]) {
+        const tx = i % WORLD_W;
+        const ty = (i - tx) / WORLD_W;
+        placed.push([tx, ty, overrides[i]]);
+      }
+    }
+    const data = {
+      version: 1,
+      seed: SEED,
+      worldSize: [WORLD_W, WORLD_H],
+      tile: TILE,
+      player: { x: player.x, y: player.y },
+      blocks: placed,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `freeworld-${SEED}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+
+  // Restore previous session if one exists.
+  loadFromLocalStorage();
+
+
+  // --- Loop ---
+  let last = performance.now();
+  let positionSaveTimer = 0;
+  let elapsed = 0;
+  let fpsAccum = 0, fpsFrames = 0, fpsTimer = 0;
+
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    elapsed += dt;
+
+    // Periodically mark position dirty so it auto-saves as you wander.
+    positionSaveTimer += dt;
+    if (positionSaveTimer >= 5) { positionSaveTimer = 0; markDirty(); }
+
+    // --- Weather update ---
+    if (weatherMode === 'auto') {
+      weatherTimer += dt;
+      if (weatherTimer >= 35) {
+        weatherTimer = 0;
+        const choices = ['clear', 'clear', 'cloudy', 'cloudy', 'rain', 'storm'];
+        currentWeather = choices[Math.floor(Math.random() * choices.length)];
+      }
+    }
+    const tgt = WEATHER_PRESETS[currentWeather];
+    // Ease toward target levels.
+    const k = Math.min(1, dt * 0.6);
+    cloudsLevel += (tgt.clouds - cloudsLevel) * k;
+    wetLevel    += (tgt.wet    - wetLevel)    * k;
+
+    // Spawn rain drops in screen space at a rate proportional to rain target.
+    const rainRate = tgt.rain * 600;
+    let toSpawn = rainRate * dt + Math.random();
+    while (toSpawn > 1) {
+      rainDrops.push({
+        sx: Math.random() * (game.width + 200) - 100,
+        sy: -20 - Math.random() * 40,
+        vy: 700 + Math.random() * 350,
+        len: 8 + Math.random() * 8,
+      });
+      toSpawn -= 1;
+    }
+    // Update existing drops; cull those below the screen.
+    for (let i = rainDrops.length - 1; i >= 0; i--) {
+      const drop = rainDrops[i];
+      drop.sy += drop.vy * dt;
+      // Drift sideways slightly to feel like wind.
+      drop.sx += dt * 60;
+      if (drop.sy > game.height + 20) rainDrops.splice(i, 1);
+    }
+
+    // Lightning during storm: schedule the next strike, decay any active flash.
+    if (tgt.storm) {
+      nextStrike -= dt;
+      if (nextStrike <= 0) {
+        flashLevel = 0.85;
+        nextStrike = 4 + Math.random() * 8;
+      }
+    } else {
+      nextStrike = 4 + Math.random() * 6;
+    }
+    flashLevel = Math.max(0, flashLevel - dt * 3.5);
+
+    fpsAccum += dt; fpsFrames++; fpsTimer += dt;
+    if (fpsTimer >= 0.5) {
+      fpsEl.textContent = (fpsFrames / fpsAccum).toFixed(0) + ' fps';
+      fpsAccum = 0; fpsFrames = 0; fpsTimer = 0;
+    }
+    abductedEl.textContent = (character === 'saucer' && abductedCount > 0)
+      ? `🛸 ${abductedCount}` : '';
+
+    // Live-update the minimap while the settings dialog is open.
+    if (settingsBg.classList.contains('open')) {
+      if (mapBaseDirty) {
+        renderMapBase();
+        mapBaseDirty = false;
+      }
+      renderMapOverlay();
+    }
+
+    if (inventoryDirty) {
+      inventoryDirty = false;
+      const order = Object.keys(INVENTORY_META);
+      const entries = order
+        .filter(k => inventory[k] > 0)
+        .map(k => [k, inventory[k]]);
+      // Append any unknown keys at the end so nothing's silently dropped.
+      for (const k of Object.keys(inventory)) {
+        if (!INVENTORY_META[k] && inventory[k] > 0) entries.push([k, inventory[k]]);
+      }
+      const html = entries.map(([k, n]) => {
+        const m = INVENTORY_META[k] || { color: '#888', label: k };
+        return `<div class="inv-slot">
+          <div class="inv-swatch" style="background:${m.color}"></div>
+          <span>${m.label}</span>
+          <span class="inv-count">${n}</span>
+        </div>`;
+      }).join('');
+      inventoryEl.innerHTML = html;
+    }
+
+    // Movement (locked while transitioning between flying/landed).
+    let dx = 0, dy = 0;
+    const locked = character === 'saucer' && transition !== 'none';
+    if (!locked) {
+      if (keys.has('w') || keys.has('arrowup'))    dy -= 1;
+      if (keys.has('s') || keys.has('arrowdown'))  dy += 1;
+      if (keys.has('a') || keys.has('arrowleft'))  dx -= 1;
+      if (keys.has('d') || keys.has('arrowright')) dx += 1;
+    }
+    if (dx || dy) {
+      const len = Math.hypot(dx, dy);
+      dx /= len; dy /= len;
+      // Saucer flies faster the more we're zoomed out (only while airborne).
+      const speedMult = (character === 'saucer' && mode === 'flying')
+        ? 1 / Math.max(0.05, zoom) : 1;
+      const step = player.speed * speedMult * dt;
+      const nx = player.x + dx * step;
+      const ny = player.y + dy * step;
+      const px = player.x, py = player.y;
+      const flying = character === 'saucer' && mode === 'flying';
+      if (flying || passable(Math.floor(nx / TILE), Math.floor(player.y / TILE))) player.x = nx;
+      if (flying || passable(Math.floor(player.x / TILE), Math.floor(ny / TILE))) player.y = ny;
+      const moved = Math.hypot(player.x - px, player.y - py);
+      distSinceStep += moved;
+      if (distSinceStep >= PRINT_SPACING && moved > 0) {
+        distSinceStep = 0;
+        const angle = Math.atan2(dy, dx);
+        if (character === 'saucer' && mode === 'landed') {
+          // Jeep tire tracks: parallel dashes spawned both sides.
+          const ox = -dy * 5 * SCALE;
+          const oy =  dx * 5 * SCALE;
+          prints.push({ x: player.x + ox, y: player.y + oy, angle, t: 0, type: 'tire' });
+          prints.push({ x: player.x - ox, y: player.y - oy, angle, t: 0, type: 'tire' });
+          if (prints.length > 600) prints.splice(0, 2);
+        } else if (character !== 'saucer') {
+          const ox = -dy * 4 * SCALE * stepSide;
+          const oy =  dx * 4 * SCALE * stepSide;
+          prints.push({ x: player.x + ox, y: player.y + oy, angle, t: 0 });
+          stepSide *= -1;
+          if (prints.length > 400) prints.shift();
+        }
+      }
+    }
+    // Smoothly turn the jeep toward the movement direction.
+    if (dx || dy) {
+      const target = Math.atan2(dy, dx);
+      let delta = target - playerAngle;
+      while (delta >  Math.PI) delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+      playerAngle += delta * Math.min(1, dt * 12);
+    }
+
+    // Auto-takeoff: walking the buggy back into the parked ship triggers takeoff.
+    if (character === 'saucer' && mode === 'landed' && ship && transition === 'none') {
+      const wpW = WORLD_W * TILE, wpH = WORLD_H * TILE;
+      let dxs = player.x - ship.x, dys = player.y - ship.y;
+      dxs = ((dxs + wpW * 1.5) % wpW) - wpW * 0.5;
+      dys = ((dys + wpH * 1.5) % wpH) - wpH * 0.5;
+      const d = Math.hypot(dxs, dys);
+      if (d > TILE * 1.6) hasLeftShip = true;
+      if (hasLeftShip && d < TILE * 0.8) {
+        transition = 'takingoff';
+        transitionT = 0;
+        // Snap the player back into the ship for the lift-off animation.
+        player.x = ship.x;
+        player.y = ship.y;
+        spawnDustBurst(ship.x, ship.y);
+      }
+    }
+
+    // Drive the transition timer + complete state changes.
+    if (transition === 'landing') {
+      transitionT += dt;
+      // Burst dust the moment the legs hit the ground.
+      if (transitionT >= LAND_DUR * 0.85 && !ship.dustDone) {
+        spawnDustBurst(ship.x, ship.y);
+        ship.dustDone = true;
+      }
+      if (transitionT >= LAND_DUR) {
+        transition = 'none'; mode = 'landed';
+        // Push the jeep out of the saucer so it doesn't spawn on top.
+        const ang = playerAngle || Math.PI / 2;
+        player.x = ship.x + Math.cos(ang) * TILE * 2.0;
+        player.y = ship.y + Math.sin(ang) * TILE * 2.0;
+        hasLeftShip = true;
+        // Jeep mode caps zoom range — clamp if we were zoomed out further.
+        zoomSlider.min = String(zoomMin());
+        if (zoom < zoomMin()) { zoom = zoomMin(); zoomSlider.value = zoom; }
+      }
+    } else if (transition === 'takingoff') {
+      transitionT += dt;
+      if (transitionT >= TAKEOFF_DUR) {
+        transition = 'none'; mode = 'flying'; ship = null; hasLeftShip = false;
+        // Saucer regains its expanded zoom range; the slider min loosens up.
+        zoomSlider.min = String(zoomMin());
+      }
+    }
+
+    // Update beam target (follows mouse on the projected globe).
+    const beamActive = beaming && character === 'saucer'
+                    && mode === 'flying' && transition === 'none';
+    bombCooldown = Math.max(0, bombCooldown - dt);
+    if (lugiaFlash) {
+      lugiaFlash.t += dt;
+      if (lugiaFlash.t >= lugiaFlash.life) lugiaFlash = null;
+    }
+    // Update Lugia button lock state — only fireable when in orbit.
+    const lugiaBtn = document.querySelector('#beam-modes .beam-mode.lugia');
+    if (lugiaBtn) lugiaBtn.classList.toggle('locked', zoom > ORBIT_ZOOM_MAX);
+    const beamCfg = BEAM_CONFIGS[beamType];
+    const beamRadius = beamCfg.radius;
+    // If the beam was just released, fling everything still in flight.
+    const continuousActive = beamActive && !beamCfg.oneShot;
+    if (lastBeamActive && !continuousActive) flingInFlightVoxels();
+    lastBeamActive = continuousActive;
+    if (continuousActive) {
+      const u = mouse.inside ? unprojectMouse(mouse.x, mouse.y) : null;
+      beamTarget = u ? { x: u.wx, y: u.wy } : { x: player.x, y: player.y };
+      // Pull voxels off tiles around the beam target.
+      voxelAccum += beamCfg.voxelsPerSec * dt;
+      while (voxelAccum >= 1) {
+        voxelAccum -= 1;
+        const ang = Math.random() * Math.PI * 2;
+        const r = Math.sqrt(Math.random()) * beamRadius;
+        const wx = beamTarget.x + Math.cos(ang) * r;
+        const wy = beamTarget.y + Math.sin(ang) * r;
+        const tx = Math.floor(wx / TILE), ty = Math.floor(wy / TILE);
+        const result = removeVoxelAt(tx, ty);
+        if (result) spawnVoxel(wx, wy, result.color, result.type);
+      }
+    } else {
+      beamTarget = null;
+      voxelAccum = 0;
+    }
+    updateVoxels(dt);
+    updateFlyingDecor(dt);
+    updateShockwaves(dt);
+    updateVoidZones(dt);
+
+    if (show.entities) updateEntities(dt);
+
+    // Age dust particles.
+    for (let i = dust.length - 1; i >= 0; i--) {
+      const d = dust[i];
+      d.t += dt;
+      d.x += d.vx * dt; d.y += d.vy * dt;
+      const drag = Math.pow(0.15, dt);
+      d.vx *= drag; d.vy *= drag;
+      if (d.t >= d.life) dust.splice(i, 1);
+    }
+
+    const curBiome = biomeAt(Math.floor(player.x / TILE), Math.floor(player.y / TILE));
+    if (curBiome !== lastBiome) {
+      if (curBiome !== 'void' && lastBiome !== 'void') jumpT = JUMP_DUR;
+      lastBiome = curBiome;
+    }
+    if (jumpT > 0) jumpT = Math.max(0, jumpT - dt);
+
+    for (let i = prints.length - 1; i >= 0; i--) {
+      prints[i].t += dt;
+      if (prints[i].t > PRINT_LIFE) prints.splice(i, 1);
+    }
+
+    // Determine the world-space tile range whose projection lands inside the screen.
+    // Visible angle from the player's pole on the sphere = asin(min(1, screenR/Rs)).
+    const screenR = Math.max(game.width, game.height) / 2 + 80;
+    const Rs = R_WORLD * zoom;
+    const sinMax = Math.min(1, screenR / Rs);
+    const angleMax = Math.asin(sinMax);
+    const arcMax = angleMax * R_WORLD;
+    const tileRange = Math.min(WORLD_W, Math.ceil(arcMax / TILE) + 2);
+    const ptx = Math.floor(player.x / TILE);
+    const pty = Math.floor(player.y / TILE);
+
+    // --- WebGL terrain pass ---
+    // (1 - cos)/2 starts at 0 (full day = noon) and reaches 1 (midnight) at half-period.
+    const dayPhase = show.daycycle ? (1 - Math.cos(elapsed * (Math.PI * 2) / 90)) * 0.5 : 0;
+    gl.useProgram(program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform2f(uni.resolution, glCanvas.width, glCanvas.height);
+    gl.uniform1f(uni.time, elapsed);
+    gl.uniform2f(uni.player, player.x, player.y);
+    gl.uniform1f(uni.day, dayPhase);
+    gl.uniform1f(uni.light, show.light ? 1.0 : 0.0);
+    gl.uniform1f(uni.vignette, show.vignette ? 1.0 : 0.0);
+    gl.uniform1f(uni.wind, show.wind ? 1.0 : 0.0);
+    gl.uniform1f(uni.zoom, zoom);
+    gl.uniform1f(uni.clouds, cloudsLevel);
+    gl.uniform1f(uni.wet, wetLevel);
+    gl.uniform1f(uni.flash, flashLevel);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // --- Canvas2D sprite/UI pass ---
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, game.width, game.height);
+
+    // Always draw sprites (trees stay through full zoom range).
+    // Stride skips tiles at low zoom to keep iteration count reasonable.
+    const stride = Math.max(1, Math.round(0.7 / Math.max(0.1, zoom)));
+    {
+
+    // Footprints / tire tracks (orthographically projected).
+    if (show.prints) for (const p of prints) {
+      const pp = projectSprite(p.x, p.y);
+      if (!pp) continue;
+      const a = 0.55 * (1 - p.t / PRINT_LIFE);
+      ctx.setTransform(pp.scale, 0, 0, pp.scale, pp.sx, pp.sy);
+      ctx.rotate(p.angle);
+      if (p.type === 'tire') {
+        ctx.fillStyle = `rgba(50, 35, 20, ${a})`;
+        ctx.fillRect(-PRINT_SPACING / 2.2, -SCALE * 0.7, PRINT_SPACING / 1.1, SCALE * 1.4);
+      } else {
+        ctx.fillStyle = `rgba(30, 20, 10, ${a})`;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 4 * SCALE, 2.2 * SCALE, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Dust particles (above prints, below sprites).
+    for (const d of dust) {
+      const pp = projectSprite(d.x, d.y);
+      if (!pp) continue;
+      const f = d.t / d.life;
+      const a = 0.65 * (1 - f);
+      const r = (3 + f * 7) * SCALE;
+      ctx.setTransform(pp.scale, 0, 0, pp.scale, pp.sx, pp.sy);
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(190, 168, 132, ${a})`;
+      ctx.fill();
+    }
+
+    // Decorations — iterate without clamping; decorAt() wraps internally so
+    // sprites tile cleanly across the world seam.
+    const tx0 = ptx - tileRange;
+    const ty0 = pty - tileRange;
+    const tx1 = ptx + tileRange;
+    const ty1 = pty + tileRange;
+    for (let ty = ty0; ty <= ty1; ty += stride) {
+      for (let tx = tx0; tx <= tx1; tx += stride) {
+        // Skip if this tile has been dug — its decoration was uprooted.
+        const wtx = ((tx % WORLD_W) + WORLD_W) % WORLD_W;
+        const wty = ((ty % WORLD_H) + WORLD_H) % WORLD_H;
+        if (texData[(wty * WORLD_W + wtx) * 4 + 3] > 0) continue;
+        const d = decorAt(tx, ty);
+        if (!d) continue;
+        if (!show[d]) continue;
+        // At low zoom, drop tiny sprites so the layer stays readable as forest dots.
+        if (stride > 1 && (d === 'grass' || d === 'rock')) continue;
+        const ox = hash01(tx, ty, 2);
+        const oy = hash01(tx, ty, 3);
+        const wpx = (tx + ox) * TILE;
+        const wpy = (ty + oy) * TILE;
+        const pp = projectSprite(wpx, wpy);
+        if (!pp) continue;
+        ctx.setTransform(pp.scale, 0, 0, pp.scale, pp.sx, pp.sy);
+        const wx = 0, wy = 0;
+        if (d === 'grass') {
+          ctx.fillStyle = '#3d6b2a';
+          ctx.fillRect(wx - 1*SCALE, wy - 1*SCALE, 2*SCALE, 2*SCALE);
+          ctx.fillRect(wx + 1*SCALE, wy,           2*SCALE, 2*SCALE);
+          ctx.fillRect(wx - 2*SCALE, wy + 1*SCALE, 2*SCALE, 2*SCALE);
+        } else if (d === 'rock') {
+          const s = (2 + hash01(tx, ty, 4) * 2) * SCALE;
+          ctx.beginPath();
+          ctx.arc(wx, wy, s, 0, Math.PI * 2);
+          ctx.fillStyle = '#5a544c'; ctx.fill();
+          ctx.strokeStyle = '#2a2622'; ctx.lineWidth = 1; ctx.stroke();
+        } else if (d === 'tree') {
+          // Top-down deciduous: layered green canopy with offset shadow + center trunk.
+          const size = (10 + hash01(tx, ty, 5) * 4) * SCALE;
+          const tint = hash01(tx, ty, 6);
+          const baseG = tint < 0.5 ? '#2e6a30' : '#3d7c3a';
+          const darkG = tint < 0.5 ? '#1d4a1f' : '#235a25';
+          const liteG = tint < 0.5 ? '#5fa050' : '#78b35c';
+          // Soft drop-shadow offset slightly toward the south-east.
+          ctx.beginPath();
+          ctx.arc(size * 0.18, size * 0.18, size * 0.95, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(0,0,0,0.30)'; ctx.fill();
+          // Outer canopy ring.
+          ctx.beginPath();
+          ctx.arc(0, 0, size, 0, Math.PI * 2);
+          ctx.fillStyle = darkG; ctx.fill();
+          // Inner canopy lobe (offset).
+          ctx.beginPath();
+          ctx.arc(-size * 0.08, -size * 0.08, size * 0.78, 0, Math.PI * 2);
+          ctx.fillStyle = baseG; ctx.fill();
+          // Sunlit highlight.
+          ctx.beginPath();
+          ctx.arc(-size * 0.32, -size * 0.32, size * 0.32, 0, Math.PI * 2);
+          ctx.fillStyle = liteG; ctx.fill();
+          // Trunk peeking through center.
+          ctx.beginPath();
+          ctx.arc(0, 0, size * 0.13, 0, Math.PI * 2);
+          ctx.fillStyle = '#3a2010'; ctx.fill();
+        } else if (d === 'pine') {
+          // Top-down conifer: spiked star (radial branches) seen from above.
+          const size = (10 + hash01(tx, ty, 5) * 5) * SCALE;
+          const snow = elev[((ty % WORLD_H) + WORLD_H) % WORLD_H * WORLD_W
+                          + ((tx % WORLD_W) + WORLD_W) % WORLD_W] >= 0.82;
+          // Shadow.
+          ctx.beginPath();
+          ctx.arc(size * 0.18, size * 0.18, size * 0.85, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fill();
+          // Star with 8 alternating points (branches).
+          const pts = 8;
+          ctx.beginPath();
+          for (let i = 0; i < pts * 2; i++) {
+            const r2 = i % 2 === 0 ? size : size * 0.55;
+            const a = i * Math.PI / pts + hash01(tx, ty, 7) * 0.4;
+            const px = Math.cos(a) * r2, py = Math.sin(a) * r2;
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.fillStyle = '#194420'; ctx.fill();
+          // Inner darker disc.
+          ctx.beginPath();
+          ctx.arc(0, 0, size * 0.45, 0, Math.PI * 2);
+          ctx.fillStyle = '#0e2c14'; ctx.fill();
+          // Snow cap on snowy biome.
+          if (snow) {
+            ctx.beginPath();
+            ctx.arc(-size * 0.05, -size * 0.05, size * 0.32, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(245,248,255,0.85)'; ctx.fill();
+          }
+          // Center trunk.
+          ctx.beginPath();
+          ctx.arc(0, 0, size * 0.10, 0, Math.PI * 2);
+          ctx.fillStyle = '#2a1808'; ctx.fill();
+        }
+      }
+    }
+
+    if (show.entities) drawEntities();
+    drawVoidZones();
+    drawShockwaves();
+    drawVoxels();
+    drawFlyingDecor();
+
+    // Editor hover + click — unproject the mouse through the globe.
+    // No bounds clamp: setBlock wraps tx/ty into the world automatically.
+    if (show.editor && mouse.inside) {
+      const u = unprojectMouse(mouse.x, mouse.y);
+      if (u) {
+        const tx = Math.floor(u.wx / TILE);
+        const ty = Math.floor(u.wy / TILE);
+        if (mouse.down) setBlock(tx, ty, activeBlock);
+        const pp = projectSprite(tx * TILE + TILE / 2, ty * TILE + TILE / 2);
+        if (pp) {
+          ctx.setTransform(pp.scale, 0, 0, pp.scale, pp.sx, pp.sy);
+          ctx.lineWidth = 2 / pp.scale;
+          ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+          ctx.strokeRect(-TILE / 2, -TILE / 2, TILE, TILE);
+        }
+      }
+    }
+
+    } // end sprite layer
+
+    // Rain particles — pure screen-space lines layered above sprites.
+    if (rainDrops.length) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.strokeStyle = 'rgba(170, 195, 230, 0.55)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      for (const drop of rainDrops) {
+        ctx.moveTo(drop.sx, drop.sy);
+        ctx.lineTo(drop.sx - drop.len * 0.4, drop.sy + drop.len);
+      }
+      ctx.stroke();
+    }
+
+    // Reset transform for screen-space player drawing.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    // Player — always at the apex of the projection (canvas center).
+    const playerR = Math.max(3, Math.min(60, player.r * zoom));
+    const jumpProg = (zoom >= 0.5 && jumpT > 0) ? 1 - jumpT / JUMP_DUR : 0;
+    const hop = Math.sin(jumpProg * Math.PI) * JUMP_HEIGHT * Math.min(1, zoom);
+    const cx = game.width / 2, cy = game.height / 2;
+
+    if (character === 'saucer') {
+      // Fixed pixel size — saucer reads as the player at any zoom or distance,
+      // and stays a consistent size before/after the jeep is out.
+      const r = 50;
+
+      // Top-down saucer. `landed01`: 0 = airborne, 1 = on the ground (legs out).
+      // `airYOffset`: extra y lift on screen for the "high in the air" feel — only
+      // valid when drawing relative to a fixed canvas point (the player at center).
+      function drawSaucerTopDown(centerX, centerY, scale, landed01, airYOffset) {
+        const rr = r * scale;
+        // Ground shadow shrinks/fades when high in the air.
+        const sFade = 1 - airYOffset / 260;
+        const sScale = Math.max(0.35, sFade);
+        ctx.beginPath();
+        ctx.ellipse(centerX, centerY,
+                    rr * 0.95 * sScale, rr * 0.95 * sScale, 0, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(0,0,0,${0.32 * sScale})`;
+        ctx.fill();
+
+        const bob = Math.sin(elapsed * 2.2) * rr * 0.04 * (1 - landed01);
+        const bodyX = centerX;
+        const bodyY = centerY - airYOffset + bob;
+
+        // Landing legs — three triangular feet that extend with `legExt`.
+        // They start to emerge once landed01 > 0.4.
+        const legExt = Math.max(0, (landed01 - 0.35) / 0.65);
+        if (legExt > 0) {
+          for (let i = 0; i < 3; i++) {
+            const ang = i * (Math.PI * 2 / 3) + Math.PI / 6;
+            const inX = bodyX + Math.cos(ang) * rr * 0.55;
+            const inY = bodyY + Math.sin(ang) * rr * 0.55;
+            const outX = bodyX + Math.cos(ang) * rr * (0.55 + 0.55 * legExt);
+            const outY = bodyY + Math.sin(ang) * rr * (0.55 + 0.55 * legExt);
+            ctx.strokeStyle = '#3a4048';
+            ctx.lineWidth = 3 * scale;
+            ctx.beginPath();
+            ctx.moveTo(inX, inY);
+            ctx.lineTo(outX, outY);
+            ctx.stroke();
+            // Foot pad
+            ctx.fillStyle = '#5a626c';
+            ctx.beginPath();
+            ctx.arc(outX, outY, rr * 0.13, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#1f2226'; ctx.lineWidth = 1.5 * scale; ctx.stroke();
+          }
+        }
+
+        // Hull (outer ring).
+        ctx.beginPath();
+        ctx.arc(bodyX, bodyY, rr, 0, Math.PI * 2);
+        const hullGrad = ctx.createRadialGradient(bodyX - rr * 0.3, bodyY - rr * 0.3, 0,
+                                                  bodyX, bodyY, rr);
+        hullGrad.addColorStop(0, '#bfc6cf');
+        hullGrad.addColorStop(1, '#6c747e');
+        ctx.fillStyle = hullGrad; ctx.fill();
+        ctx.strokeStyle = '#1f2226'; ctx.lineWidth = 2 * scale; ctx.stroke();
+        // Inner ring.
+        ctx.beginPath();
+        ctx.arc(bodyX, bodyY, rr * 0.7, 0, Math.PI * 2);
+        ctx.fillStyle = '#5a626c'; ctx.fill();
+        ctx.stroke();
+        // Dome.
+        const domeGrad = ctx.createRadialGradient(bodyX - rr * 0.15, bodyY - rr * 0.18, 0,
+                                                  bodyX, bodyY, rr * 0.4);
+        domeGrad.addColorStop(0, 'rgba(220, 245, 255, 1)');
+        domeGrad.addColorStop(1, 'rgba(70, 140, 200, 0.95)');
+        ctx.beginPath();
+        ctx.arc(bodyX, bodyY, rr * 0.4, 0, Math.PI * 2);
+        ctx.fillStyle = domeGrad; ctx.fill();
+        ctx.strokeStyle = '#1f2226'; ctx.lineWidth = 1.5 * scale; ctx.stroke();
+        // Highlight.
+        ctx.beginPath();
+        ctx.arc(bodyX - rr * 0.16, bodyY - rr * 0.18, rr * 0.1, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fill();
+
+        // Lights spinning around the rim.
+        for (let i = 0; i < 8; i++) {
+          const phase = (i / 8 + elapsed * 0.35) * Math.PI * 2;
+          const lx = bodyX + Math.cos(phase) * rr * 0.86;
+          const ly = bodyY + Math.sin(phase) * rr * 0.86;
+          const on = (Math.floor(elapsed * 5) + i) % 3 === 0;
+          ctx.beginPath();
+          ctx.arc(lx, ly, rr * 0.09, 0, Math.PI * 2);
+          ctx.fillStyle = on ? '#fff7a0' : '#c08030';
+          ctx.fill();
+        }
+
+        // Tractor beam glow when airborne (fades as we land).
+        if (airYOffset > 4 && (1 - landed01) > 0.05) {
+          const beamGrad = ctx.createRadialGradient(centerX, centerY, 0,
+                                                    centerX, centerY, rr * 1.7);
+          beamGrad.addColorStop(0, `rgba(180, 230, 255, ${0.18 * (1 - landed01)})`);
+          beamGrad.addColorStop(1, 'rgba(180, 230, 255, 0)');
+          ctx.fillStyle = beamGrad;
+          ctx.fillRect(centerX - rr * 1.7, centerY - rr * 1.7, rr * 3.4, rr * 3.4);
+        }
+      }
+
+      // Cybertruck top-down — angular wedge silhouette, brushed-steel body,
+      // single-bar headlight + tail-light, four chunky tires.
+      function drawJeep(centerX, centerY, rr, angle) {
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.rotate(angle);
+        // Shadow.
+        ctx.beginPath();
+        ctx.ellipse(0, rr * 0.08, rr * 1.25, rr * 0.7, 0, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0,0,0,0.32)'; ctx.fill();
+        // Tires — flat black rectangles, forward axle slightly inboard.
+        ctx.fillStyle = '#070707';
+        for (const [tx, ty] of [[ rr*0.62, -rr*0.78],[ rr*0.62, rr*0.78],
+                                [-rr*0.72, -rr*0.78],[-rr*0.72, rr*0.78]]) {
+          ctx.fillRect(tx - rr*0.18, ty - rr*0.22, rr*0.36, rr*0.44);
+        }
+        // Wedge body — narrower at the front, sharp angles.
+        ctx.beginPath();
+        ctx.moveTo( rr*1.10,  0);                  // nose tip
+        ctx.lineTo( rr*0.85, -rr*0.55);
+        ctx.lineTo( rr*0.10, -rr*0.65);
+        ctx.lineTo(-rr*1.05, -rr*0.62);
+        ctx.lineTo(-rr*1.05,  rr*0.62);
+        ctx.lineTo( rr*0.10,  rr*0.65);
+        ctx.lineTo( rr*0.85,  rr*0.55);
+        ctx.closePath();
+        const bodyGrad = ctx.createLinearGradient(0, -rr*0.6, 0, rr*0.6);
+        bodyGrad.addColorStop(0,   '#cdd2d8');
+        bodyGrad.addColorStop(0.5, '#9ba2a9');
+        bodyGrad.addColorStop(1,   '#727880');
+        ctx.fillStyle = bodyGrad; ctx.fill();
+        ctx.strokeStyle = '#1a1d22'; ctx.lineWidth = 1.5; ctx.stroke();
+        // Cabin/roof — angular trapezoid lifted off the body.
+        ctx.beginPath();
+        ctx.moveTo( rr*0.55, -rr*0.45);
+        ctx.lineTo( rr*0.55,  rr*0.45);
+        ctx.lineTo(-rr*0.55,  rr*0.55);
+        ctx.lineTo(-rr*0.55, -rr*0.55);
+        ctx.closePath();
+        ctx.fillStyle = '#3a3f46'; ctx.fill();
+        ctx.strokeStyle = '#0f1115'; ctx.lineWidth = 1.5; ctx.stroke();
+        // Tinted windshield slab, sloped angular.
+        ctx.beginPath();
+        ctx.moveTo( rr*0.50, -rr*0.40);
+        ctx.lineTo( rr*0.05, -rr*0.43);
+        ctx.lineTo( rr*0.05,  rr*0.43);
+        ctx.lineTo( rr*0.50,  rr*0.40);
+        ctx.closePath();
+        ctx.fillStyle = '#0a0d10'; ctx.fill();
+        // Rear glass.
+        ctx.beginPath();
+        ctx.moveTo(-rr*0.50, -rr*0.40);
+        ctx.lineTo(-rr*0.10, -rr*0.42);
+        ctx.lineTo(-rr*0.10,  rr*0.42);
+        ctx.lineTo(-rr*0.50,  rr*0.40);
+        ctx.closePath();
+        ctx.fillStyle = '#0a0d10'; ctx.fill();
+        // Bed dividing line.
+        ctx.strokeStyle = '#3a3f46'; ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(-rr*0.55, -rr*0.55); ctx.lineTo(-rr*0.55, rr*0.55);
+        ctx.stroke();
+        // Single headlight bar (signature LED strip across the nose).
+        ctx.fillStyle = '#fffbd0';
+        ctx.fillRect(rr*0.92, -rr*0.45, rr*0.12, rr*0.9);
+        ctx.strokeStyle = '#1a1d22'; ctx.lineWidth = 0.8;
+        ctx.strokeRect(rr*0.92, -rr*0.45, rr*0.12, rr*0.9);
+        // Single taillight bar (red across the rear).
+        ctx.fillStyle = '#ff3030';
+        ctx.fillRect(-rr*1.06, -rr*0.50, rr*0.06, rr*1.0);
+        // Side body crease (subtle highlight line).
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo( rr*0.95,  0);
+        ctx.lineTo(-rr*1.00,  0);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Determine landed01 across all states.
+      const flyElevation = Math.min(game.height * 0.35, (1 - Math.min(zoom, 1)) * 220);
+      let landed01 = 0;
+      if (transition === 'landing')        landed01 = transitionT / LAND_DUR;
+      else if (transition === 'takingoff') landed01 = 1 - transitionT / TAKEOFF_DUR;
+      else if (mode === 'landed')          landed01 = 1;
+      // Ease in for a softer landing.
+      const eased = 1 - Math.pow(1 - landed01, 2.5);
+
+      // The saucer is at canvas center when in flight; while landed it sits at the
+      // ship's projected world position and the buggy occupies the center.
+      const showBuggy = mode === 'landed' && transition === 'none';
+      if (showBuggy) {
+        // Parked ship at world coords — fixed size so it doesn't shrink as the jeep drives.
+        if (ship) {
+          const pp = projectSprite(ship.x, ship.y);
+          if (pp) drawSaucerTopDown(pp.sx, pp.sy, 1, 1, 0);
+        }
+        // Cybertruck at canvas center.
+        drawJeep(cx, cy, 28, playerAngle);
+      } else {
+        // Either fully airborne, or in the middle of a transition — saucer at center.
+        const air = flyElevation * (1 - eased);
+        // Tractor beam — green, mouse-aimed cone with orbiting rings.
+        if (beaming && mode === 'flying' && transition === 'none' && beamTarget
+            && !BEAM_CONFIGS[beamType].oneShot) {
+          const tpp = projectSprite(beamTarget.x, beamTarget.y);
+          if (tpp) {
+            const cfg = BEAM_CONFIGS[beamType];
+            const sxTop = cx, syTop = cy - air + r * 0.18;
+            const sxBot = tpp.sx, syBot = tpp.sy;
+            const dx = sxBot - sxTop, dy = syBot - syTop;
+            const len = Math.max(1, Math.hypot(dx, dy));
+            const ux = dx / len, uy = dy / len;          // along axis
+            const px = -uy, py = ux;                      // perpendicular
+            const topHalfW = r * cfg.topHalfWMul;
+            const bottomHalfW = cfg.radius * zoom * tpp.scale;
+
+          // Soft beam body — trapezoid from saucer to mouse target.
+          const colGrad = ctx.createLinearGradient(sxTop, syTop, sxBot, syBot);
+          colGrad.addColorStop(0,    'rgba(150, 255, 160, 0.55)');
+          colGrad.addColorStop(0.6,  'rgba(110, 240, 130, 0.30)');
+          colGrad.addColorStop(1,    'rgba(80, 220, 110, 0.10)');
+          ctx.fillStyle = colGrad;
+          ctx.beginPath();
+          ctx.moveTo(sxTop + px * topHalfW, syTop + py * topHalfW);
+          ctx.lineTo(sxTop - px * topHalfW, syTop - py * topHalfW);
+          ctx.lineTo(sxBot - px * bottomHalfW, syBot - py * bottomHalfW);
+          ctx.lineTo(sxBot + px * bottomHalfW, syBot + py * bottomHalfW);
+          ctx.closePath();
+          ctx.fill();
+
+          // Bright disc on the ground at the beam target.
+          const splash = ctx.createRadialGradient(sxBot, syBot, 0, sxBot, syBot, bottomHalfW);
+          splash.addColorStop(0, 'rgba(180, 255, 190, 0.65)');
+          splash.addColorStop(0.6, 'rgba(110, 240, 130, 0.30)');
+          splash.addColorStop(1, 'rgba(80, 220, 100, 0)');
+          ctx.fillStyle = splash;
+          ctx.beginPath();
+          ctx.ellipse(sxBot, syBot, bottomHalfW, bottomHalfW * 0.55, 0, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Orbiting rings perpendicular to the beam axis (wobble in the perp
+          // direction to suggest 3-D rotation around the beam axis).
+          const RINGS = 4;
+          for (let i = 0; i < RINGS; i++) {
+            const t = ((i / RINGS) + (elapsed * 0.55)) % 1;
+            const ax = sxTop + (sxBot - sxTop) * t;
+            const ay = syTop + (syBot - syTop) * t;
+            const halfW = topHalfW + (bottomHalfW - topHalfW) * t;
+            const tilt = 0.18 + (Math.sin(elapsed * 2.2 + i * 1.3) * 0.5 + 0.5) * 0.55;
+            ctx.strokeStyle = `rgba(170, 255, 180, ${0.85 * (1 - t * 0.35)})`;
+            ctx.lineWidth = 2.5;
+            ctx.save();
+            ctx.translate(ax, ay);
+            ctx.rotate(Math.atan2(uy, ux));
+            ctx.beginPath();
+            ctx.ellipse(0, 0, halfW * tilt, halfW, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+
+          // Sparkles spiralling along the beam axis.
+          const SPARKS = 14;
+          const beamLen = len;
+          for (let i = 0; i < SPARKS; i++) {
+            const heightT = ((i / SPARKS) + (-elapsed * 0.6) + 1) % 1;
+            const ax = sxTop + (sxBot - sxTop) * heightT;
+            const ay = syTop + (syBot - syTop) * heightT;
+            const halfW = topHalfW + (bottomHalfW - topHalfW) * heightT;
+            const phase = (i * 1.31 + elapsed * 1.5) * Math.PI * 2;
+            const c = Math.cos(phase), s = Math.sin(phase);
+            const off = c * halfW * 0.95;       // perpendicular displacement
+            const depth = s * halfW * 0.35;     // depth tilt
+            const sxp = ax + px * off + ux * depth;
+            const syp = ay + py * off + uy * depth;
+            const front = s > 0;
+            ctx.fillStyle = front
+              ? `rgba(220, 255, 220, ${0.85 * (1 - heightT * 0.4)})`
+              : `rgba(120, 220, 130, ${0.55 * (1 - heightT * 0.4)})`;
+            ctx.beginPath();
+            ctx.arc(sxp, syp, 2.5 + Math.sin(elapsed * 5 + i) * 0.8, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          }
+        }
+        // Lugia Aeroblast flash — bright beam line + impact glow.
+        if (lugiaFlash) {
+          const ipp = projectSprite(lugiaFlash.x, lugiaFlash.y);
+          if (ipp) {
+            const t = lugiaFlash.t / lugiaFlash.life;
+            const a = (1 - t) * (1 - t);
+            // Beam trail from the saucer body to the impact.
+            const sxF = cx, syF = cy - air;
+            const grad = ctx.createLinearGradient(sxF, syF, ipp.sx, ipp.sy);
+            grad.addColorStop(0, `rgba(220, 250, 255, ${a})`);
+            grad.addColorStop(1, `rgba(140, 220, 255, ${a * 0.4})`);
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = (1 - t) * 26;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(sxF, syF);
+            ctx.lineTo(ipp.sx, ipp.sy);
+            ctx.stroke();
+            // Inner core line.
+            ctx.strokeStyle = `rgba(255, 255, 255, ${a})`;
+            ctx.lineWidth = (1 - t) * 8;
+            ctx.beginPath();
+            ctx.moveTo(sxF, syF);
+            ctx.lineTo(ipp.sx, ipp.sy);
+            ctx.stroke();
+            ctx.lineCap = 'butt';
+            // Impact disc.
+            const ir = 60 + t * 240;
+            const igrad = ctx.createRadialGradient(ipp.sx, ipp.sy, 0, ipp.sx, ipp.sy, ir);
+            igrad.addColorStop(0,    `rgba(255, 255, 255, ${a})`);
+            igrad.addColorStop(0.4,  `rgba(180, 240, 255, ${a * 0.7})`);
+            igrad.addColorStop(1,    `rgba(120, 200, 255, 0)`);
+            ctx.fillStyle = igrad;
+            ctx.beginPath(); ctx.arc(ipp.sx, ipp.sy, ir, 0, Math.PI * 2); ctx.fill();
+            // Tiny full-screen brightening on the first beat.
+            if (t < 0.18) {
+              ctx.fillStyle = `rgba(220, 245, 255, ${0.35 * (1 - t / 0.18)})`;
+              ctx.fillRect(0, 0, game.width, game.height);
+            }
+          }
+        }
+        drawSaucerTopDown(cx, cy, 1, eased, air);
+      }
+    } else {
+      if (hop > 0.1) {
+        ctx.beginPath();
+        ctx.ellipse(cx, cy + 3, playerR * (1 - hop / (JUMP_HEIGHT * 2.5)), 3, 0, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(0,0,0,${0.35 * (1 - hop / JUMP_HEIGHT)})`;
+        ctx.fill();
+      }
+      ctx.beginPath();
+      ctx.arc(cx, cy - hop, playerR, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff'; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = '#000'; ctx.stroke();
+    }
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
