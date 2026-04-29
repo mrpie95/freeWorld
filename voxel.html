@@ -36,6 +36,91 @@
   }
   #click-to-play.hidden { display: none; }
 
+  /* World-gen screen — full-screen overlay shown on app load. */
+  #worldgen-bg {
+    position: fixed; inset: 0; z-index: 30;
+    background: radial-gradient(120% 100% at 50% 0%,
+                                rgba(40,30,80,0.50) 0%,
+                                rgba(8,10,18,0.95) 70%);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    font: 13px/1.5 system-ui, sans-serif; color: #e0e4ef;
+  }
+  #worldgen-bg.hidden { display: none; }
+  #worldgen {
+    background: rgba(20,22,30,0.92);
+    border: 1px solid #444; border-radius: 12px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.6);
+    padding: 22px 26px; width: min(720px, 96vw);
+    max-height: 92vh; overflow-y: auto;
+  }
+  #worldgen h1 {
+    margin: 0 0 4px; font-size: 18px; letter-spacing: 2px;
+    text-transform: uppercase; opacity: 0.92;
+  }
+  #worldgen .subtitle {
+    margin: 0 0 16px; font-size: 11px; opacity: 0.55; letter-spacing: 1px;
+  }
+  #worldgen .section-label {
+    font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
+    opacity: 0.5; margin: 14px 0 6px;
+  }
+  #worldgen .biome-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px;
+  }
+  #worldgen .biome-card {
+    background: rgba(35,38,50,0.7); border: 1px solid #3a3a44;
+    border-radius: 8px; padding: 10px 8px; text-align: center;
+    cursor: pointer; transition: all 0.15s;
+  }
+  #worldgen .biome-card:hover { background: rgba(50,55,72,0.8); border-color: #6a8fff; }
+  #worldgen .biome-card.selected {
+    background: rgba(72,90,140,0.45);
+    border-color: #8aa8ff;
+    box-shadow: 0 0 0 1px #8aa8ff inset;
+  }
+  #worldgen .biome-card .emoji { font-size: 26px; line-height: 1; }
+  #worldgen .biome-card .name { font-size: 11px; opacity: 0.85; margin-top: 4px; }
+  #worldgen .row {
+    display: grid; grid-template-columns: 100px 1fr 70px;
+    gap: 10px; align-items: center; padding: 5px 0;
+  }
+  #worldgen .row .label { opacity: 0.78; font-size: 12px; }
+  #worldgen .row .val { opacity: 0.85; font-size: 11px; text-align: right; }
+  #worldgen input[type=range] { width: 100%; accent-color: #8aa8ff; }
+  #worldgen input[type=number], #worldgen select {
+    background: #1a1a22; color: #ddd; border: 1px solid #444;
+    border-radius: 4px; padding: 4px 8px; font: inherit;
+  }
+  #worldgen .checkbox-row {
+    display: flex; gap: 14px; flex-wrap: wrap; padding: 8px 0;
+  }
+  #worldgen .checkbox-row label {
+    display: flex; align-items: center; gap: 6px; font-size: 12px;
+    opacity: 0.85; cursor: pointer;
+  }
+  #worldgen .actions {
+    display: flex; gap: 10px; justify-content: flex-end;
+    margin-top: 18px; padding-top: 14px; border-top: 1px solid #2a2a32;
+  }
+  #worldgen button.primary, #worldgen button.secondary {
+    padding: 8px 18px; border-radius: 6px; cursor: pointer; font: inherit;
+    font-size: 13px; letter-spacing: 0.5px;
+  }
+  #worldgen button.primary {
+    background: #4d6cff; color: #fff; border: 1px solid #6a8fff;
+  }
+  #worldgen button.primary:hover { background: #6a8fff; }
+  #worldgen button.secondary {
+    background: #2a2a32; color: #aab; border: 1px solid #444;
+  }
+  #worldgen button.secondary:hover { background: #3a3a44; color: #ddd; }
+  #worldgen .reserved-note {
+    font-size: 10px; opacity: 0.4; margin-top: 6px; font-style: italic;
+  }
+
   #dev-stats {
     position: fixed; top: 8px; right: 12px;
     background: rgba(15, 18, 28, 0.85);
@@ -229,6 +314,88 @@
 </div>
 <div id="click-to-play">click to enter</div>
 
+<!-- World-gen screen — shown on app load. The Generate button hands a
+     worldConfig to regenerateWorld(). Future planet types/parameters
+     plug in here without touching the in-game settings dialog. -->
+<div id="worldgen-bg">
+  <div id="worldgen">
+    <h1>Voxel Planet</h1>
+    <p class="subtitle">Choose your world</p>
+
+    <div class="section-label">Biome</div>
+    <div class="biome-grid" id="wg-biomes"></div>
+
+    <div class="section-label">Life</div>
+    <div class="row">
+      <span class="label">Density</span>
+      <input type="range" id="wg-life" min="0" max="100" step="1" value="70">
+      <span class="val" id="wg-life-val">Alive</span>
+    </div>
+    <div class="row">
+      <span class="label">Trees</span>
+      <input type="range" id="wg-trees" min="0" max="200" step="5" value="100">
+      <span class="val" id="wg-trees-val">100%</span>
+    </div>
+    <div class="row">
+      <span class="label">Grass</span>
+      <input type="range" id="wg-grass" min="0" max="200" step="5" value="100">
+      <span class="val" id="wg-grass-val">100%</span>
+    </div>
+    <div class="row">
+      <span class="label">Sheep</span>
+      <input type="range" id="wg-sheep" min="0" max="30" step="1" value="5">
+      <span class="val" id="wg-sheep-val">5%</span>
+    </div>
+
+    <div class="section-label">Terrain</div>
+    <div class="row">
+      <span class="label">Size</span>
+      <select id="wg-size">
+        <option value="96">96 × 96</option>
+        <option value="128">128 × 128</option>
+        <option value="192">192 × 192</option>
+        <option value="256">256 × 256</option>
+        <option value="384" selected>384 × 384</option>
+        <option value="512">512 × 512</option>
+        <option value="768">768 × 768</option>
+        <option value="1024">1024 × 1024 — caution</option>
+      </select>
+      <span class="val"></span>
+    </div>
+    <div class="row">
+      <span class="label">Max height</span>
+      <input type="range" id="wg-maxh" min="4" max="30" step="1" value="30">
+      <span class="val" id="wg-maxh-val">30</span>
+    </div>
+    <div class="row">
+      <span class="label">Crust</span>
+      <input type="range" id="wg-crust" min="12" max="360" step="4" value="180">
+      <span class="val" id="wg-crust-val">deep</span>
+    </div>
+    <div class="checkbox-row">
+      <label><input type="checkbox" id="wg-poles" checked> Polar caps</label>
+    </div>
+
+    <div class="section-label">Seed</div>
+    <div class="row">
+      <span class="label">Number</span>
+      <input type="number" id="wg-seed" placeholder="random">
+      <span class="val">
+        <button class="secondary" id="wg-reroll" style="padding:3px 8px; font-size:11px">🎲</button>
+      </span>
+    </div>
+
+    <p class="reserved-note">
+      More worlds coming: archipelago · jungle · gas giant · binary · ringed · cities · weather…
+    </p>
+
+    <div class="actions">
+      <button class="secondary" id="wg-cancel" style="display:none">Back</button>
+      <button class="primary" id="wg-generate">Generate ✨</button>
+    </div>
+  </div>
+</div>
+
 <div id="toolbar"></div>
 
 <div id="perf-bottom">
@@ -297,11 +464,16 @@
         </div>
       </div>
       <button class="action" id="generate-world">Generate</button>
+      <button class="action" id="open-worldgen" style="margin-left:8px">🌍 New Planet…</button>
     </div>
     <div class="row">
       <div class="label">
         <div>World map</div>
         <div class="desc" id="map-meta">– seed</div>
+      </div>
+      <div style="display:flex; gap:6px">
+        <button class="action" id="map-mode-biome" style="padding:4px 10px; font-size:11px">Biome</button>
+        <button class="action" id="map-mode-temp" style="padding:4px 10px; font-size:11px">🌡 Temp</button>
       </div>
     </div>
     <canvas id="map" width="256" height="256"></canvas>
@@ -1011,6 +1183,253 @@ void main() {
   let SEED = 1337;
   let polesEnabled = true;
   let maxTerrainH = 30;
+  // Hoisted up so worldConfig/regenerateWorld can write it; the actual
+  // sheep system lives much later in the file.
+  let sheepRatePct = 5;
+
+  // ===================================================================
+  // BIOME REGISTRY  — each biome is a data record, picked once per
+  // world. The active record drives surface palette, strata tint,
+  // map color, vegetation profile, and water/polar style. Adding a
+  // biome = adding an entry; no other code paths need editing.
+  // ===================================================================
+  // Helpers for vivid alien tints. Each biome keeps colors as plain
+  // RGB arrays so they can be lerped/jittered at sample time.
+  function vegProfile(treeRate, grassRate, opts = {}) {
+    return Object.assign({
+      treeRate, grassRate,
+      // Multipliers on the canopy + grass base color.
+      treeCanopyTint: [1, 1, 1],
+      treeTrunkTint:  [1, 1, 1],
+      grassTint:      [1, 1, 1],
+    }, opts);
+  }
+  const BIOMES = {
+    earth: {
+      id: 'earth', name: 'Earth-like', emoji: '🌍',
+      // Vegetation: standard Earth grass + trees.
+      veg: vegProfile(1.0, 1.0),
+      // Snow-capped poles look right here.
+      polarStyle: 'snow',
+      // Sea level band as in original Earth gen.
+      hasOcean: true,
+      // Surface palette — same bands as the original biomeColor.
+      surfaceColor(e, m) {
+        if (e < 0.35) return [0.07, 0.16, 0.38];
+        if (e < 0.42) return [0.18, 0.40, 0.68];
+        if (e < 0.46) return [0.86, 0.78, 0.55];
+        if (e < 0.70) return m < 0.45 ? [0.55, 0.67, 0.31] : [0.27, 0.51, 0.24];
+        if (e < 0.82) return [0.35, 0.31, 0.24];
+        return [0.74, 0.76, 0.80];
+      },
+      mapColor(e, m) {
+        if (e < 0.35) return [30, 60, 120];
+        if (e < 0.42) return [50, 100, 170];
+        if (e < 0.46) return [220, 200, 140];
+        if (e < 0.70) return m < 0.45 ? [140, 170, 80] : [70, 130, 60];
+        if (e < 0.82) return [90, 80, 60];
+        return [220, 220, 230];
+      },
+      // Subterranean strata tint multiplier (1=Earth defaults).
+      strataTint: [1, 1, 1],
+      ambientTint: [1, 1, 1],
+    },
+
+    desert: {
+      id: 'desert', name: 'Desert', emoji: '🏜️',
+      veg: vegProfile(0.20, 0.45, {
+        // Cactus-ish: muted green canopy, tan trunk.
+        treeCanopyTint: [0.55, 0.95, 0.55],
+        treeTrunkTint:  [1.6, 1.3, 0.9],
+        grassTint:      [1.5, 1.2, 0.6],
+      }),
+      polarStyle: 'sand',          // no snow, just paler sand
+      hasOcean: true,              // a few oases / shallow seas
+      surfaceColor(e, m) {
+        if (e < 0.35) return [0.32, 0.48, 0.55];        // shallow oasis
+        if (e < 0.42) return [0.50, 0.70, 0.65];        // light water
+        if (e < 0.50) return [0.94, 0.84, 0.55];        // dune
+        if (e < 0.72) return [0.86, 0.69, 0.40];        // desert plain
+        if (e < 0.86) return [0.66, 0.42, 0.24];        // mesa
+        return [0.92, 0.80, 0.62];                       // pale ridge
+      },
+      mapColor(e, m) {
+        if (e < 0.35) return [80, 120, 140];
+        if (e < 0.42) return [130, 180, 170];
+        if (e < 0.50) return [240, 215, 140];
+        if (e < 0.72) return [220, 175, 100];
+        if (e < 0.86) return [170, 105, 60];
+        return [235, 205, 160];
+      },
+      // Hot dunes, mild oases, cold-ish high mesas at night.
+      surfaceTemp(e, m) {
+        if (e < 0.42) return 130;       // oasis
+        if (e < 0.50) return 200;       // sun-baked dunes
+        if (e < 0.72) return 195;
+        return 160;                      // mesas — slightly cooler at altitude
+      },
+      strataTint: [1.10, 0.95, 0.78],
+      ambientTint: [1.08, 1.00, 0.85],
+    },
+
+    ice: {
+      id: 'ice', name: 'Ice world', emoji: '🧊',
+      veg: vegProfile(0.0, 0.0),       // no veg
+      polarStyle: 'snow',              // already snow everywhere — extra polish
+      hasOcean: true,                  // frozen sea (still water tiles)
+      surfaceColor(e, m) {
+        if (e < 0.35) return [0.18, 0.30, 0.50];        // deep dark ice
+        if (e < 0.42) return [0.40, 0.62, 0.80];        // sea ice
+        if (e < 0.50) return [0.80, 0.88, 0.95];        // shoreline pack ice
+        if (e < 0.72) return [0.88, 0.92, 0.96];        // snowfields
+        if (e < 0.86) return [0.72, 0.80, 0.92];        // rocky ridge
+        return [0.94, 0.96, 1.00];                       // peaks
+      },
+      mapColor(e, m) {
+        if (e < 0.35) return [40, 70, 120];
+        if (e < 0.42) return [100, 150, 200];
+        if (e < 0.50) return [200, 220, 240];
+        if (e < 0.72) return [220, 230, 245];
+        if (e < 0.86) return [180, 200, 230];
+        return [240, 245, 255];
+      },
+      // Frozen everywhere; deep ocean slightly warmer than the snowfields.
+      surfaceTemp(e, m) {
+        if (e < 0.35) return 60;
+        if (e < 0.42) return 50;
+        if (e < 0.72) return 30;
+        return 15;                        // peak ice
+      },
+      strataTint: [0.85, 0.92, 1.10],
+      ambientTint: [0.92, 0.98, 1.10],
+    },
+
+    volcanic: {
+      id: 'volcanic', name: 'Volcanic', emoji: '🌋',
+      veg: vegProfile(0.05, 0.10, {
+        // Very few charred trees.
+        treeCanopyTint: [0.40, 0.20, 0.10],
+        treeTrunkTint:  [0.30, 0.20, 0.18],
+        grassTint:      [0.55, 0.40, 0.30],
+      }),
+      polarStyle: 'none',
+      // No water — the regen fill skips water tiles, so the emissive
+      // lava-band surface colors render directly and bloom/warm-emit
+      // shader paths catch them. Lakes appear as glowing magma pools.
+      hasOcean: false,
+      surfaceColor(e, m) {
+        // Cranked emissive values (R well above bloom threshold) so the
+        // lava bands glow on both day and night sides — the warm-emit
+        // additive path in the fragment shader picks these up.
+        if (e < 0.35) return [4.5, 0.55, 0.10];         // deepest magma — molten core
+        if (e < 0.42) return [3.6, 0.45, 0.10];         // lava pool
+        if (e < 0.50) return [0.55, 0.22, 0.14];        // ash beach
+        if (e < 0.72) return [0.20, 0.16, 0.16];        // basalt plain
+        if (e < 0.86) return [0.32, 0.18, 0.14];        // red ridge
+        return [0.55, 0.30, 0.20];                       // sulfur peaks
+      },
+      mapColor(e, m) {
+        if (e < 0.35) return [255, 130, 30];      // bright glowing magma
+        if (e < 0.42) return [240, 90, 20];       // lava pool
+        if (e < 0.50) return [80, 50, 40];
+        if (e < 0.72) return [40, 35, 35];
+        if (e < 0.86) return [80, 45, 35];
+        return [120, 70, 50];
+      },
+      // Lava bands hit the molten cap; everything else is warm-to-hot.
+      surfaceTemp(e, m) {
+        if (e < 0.35) return 255;
+        if (e < 0.42) return 245;
+        if (e < 0.50) return 200;       // ash — recently cooled
+        if (e < 0.72) return 175;
+        return 150;
+      },
+      strataTint: [1.20, 0.75, 0.65],
+      ambientTint: [1.10, 0.85, 0.80],
+    },
+
+    alien: {
+      id: 'alien', name: 'Alien', emoji: '🍄',
+      veg: vegProfile(0.85, 1.0, {
+        treeCanopyTint: [1.6, 0.5, 1.6],   // magenta spore-tree canopy
+        treeTrunkTint:  [0.8, 0.6, 1.1],
+        grassTint:      [1.4, 0.7, 1.7],
+      }),
+      polarStyle: 'snow',
+      hasOcean: true,
+      surfaceColor(e, m) {
+        if (e < 0.35) return [0.10, 0.18, 0.34];        // bioluminescent depths
+        if (e < 0.42) return [0.20, 0.35, 0.65];        // teal sea
+        if (e < 0.46) return [0.62, 0.50, 0.78];        // lavender shore
+        if (e < 0.70) return m < 0.45 ? [0.62, 0.32, 0.78] : [0.40, 0.20, 0.62];
+        if (e < 0.82) return [0.42, 0.30, 0.50];        // dark mauve rock
+        return [0.78, 0.85, 0.95];                       // pale crystal peaks
+      },
+      mapColor(e, m) {
+        if (e < 0.35) return [40, 50, 100];
+        if (e < 0.42) return [60, 90, 170];
+        if (e < 0.46) return [180, 140, 220];
+        if (e < 0.70) return m < 0.45 ? [180, 90, 220] : [120, 60, 180];
+        if (e < 0.82) return [110, 80, 130];
+        return [220, 230, 250];
+      },
+      // Bioluminescent equator (warm), cold crystal peaks.
+      surfaceTemp(e, m) {
+        if (e < 0.42) return 135;
+        if (e < 0.70) return 145;
+        if (e < 0.82) return 110;
+        return 50;                        // crystal peaks frozen
+      },
+      strataTint: [1.05, 0.85, 1.20],
+      ambientTint: [1.05, 0.92, 1.20],
+    },
+  };
+  // Active biome — set by regenerateWorld(config). Defaults to Earth so
+  // any code path that runs before the first regenerate doesn't crash.
+  let activeBiome = BIOMES.earth;
+
+  // Default temperature sampler — used when a biome doesn't specify its
+  // own surfaceTemp. Cold ridges, ambient mid-band, scaled into a U8.
+  function defaultSurfaceTemp(biome, e, m) {
+    if (biome.surfaceTemp) return biome.surfaceTemp(e, m);
+    // Earth-like fallback: ocean cool, mid warm, ridges cooler again.
+    if (e < 0.42) return 110;        // sea — cool
+    if (e < 0.46) return 150;        // beach
+    if (e < 0.70) return 145;        // grass — temperate
+    if (e < 0.82) return 120;        // mountain rock — chillier
+    return 60;                        // peaks — cold
+  }
+  function sampleBiomeTemp(biome, e, m) {
+    return Math.max(0, Math.min(255, defaultSurfaceTemp(biome, e, m) | 0));
+  }
+
+  // ===================================================================
+  // WORLD CONFIG  — single source of truth for everything tunable.
+  // The world-gen screen produces one of these; the in-game settings
+  // dialog mutates one. regenerateWorld(config) consumes it. Adding a
+  // new param later = one new field.
+  // ===================================================================
+  function defaultWorldConfig() {
+    return {
+      seed: (Math.random() * 1e9) | 0,
+      size: 384,
+      biome: 'earth',
+      maxHeight: 30,
+      crust: 180,
+      polarCaps: true,
+      // 0..1 — drives vegetation density, sheep density, fireflies
+      // (multiplies each biome's intrinsic profile).
+      life: 0.7,
+      // Per-tool veg overrides (multipliers on biome intrinsic).
+      treeDensity: 1.0,
+      grassDensity: 1.0,
+      sheepPct: 5,
+    };
+  }
+  // Live world config — populated by the world-gen screen, then by any
+  // later regen call. Kept so future systems can read "what kind of
+  // planet is this?" without re-deriving from globals.
+  let worldConfig = defaultWorldConfig();
   // Vertical squash for the planet shader — pre-scaling sheep/tree Y by
   // 1/HEIGHT_SCALE keeps them looking proportional instead of squashed.
   // (Hoisted here; PLANET_R is computed later because it depends on W.)
@@ -1019,6 +1438,7 @@ void main() {
   // solid heights[i] column. Cellular-automaton tick equalizes flow each frame.
   let water = new Uint8Array(0);
   let pierced = new Uint8Array(0);          // 1 where a Lugia beam tore through
+  let tileTemp = new Uint8Array(0);         // thermal state, 0=frozen→255=molten
   let origHeights = new Int16Array(0);      // heights as procedurally generated
   // Tree state per tile: 0 = none, 1 = alive, 2 = burning, 3 = burnt stump.
   let treesAt = new Uint8Array(0);
@@ -1032,12 +1452,30 @@ void main() {
   let waterTickAccum = 0;
   const WATER_TICK = 0.04;
   const WATER_MAX = 32;
-  function regenerateWorld(seedV, sizeV, addPoles, maxH, crustDepth) {
-    SEED = seedV | 0;
-    W = sizeV; D = sizeV;
-    polesEnabled = !!addPoles;
-    maxTerrainH = maxH || 30;
-    DEPTH = Math.max(8, (crustDepth | 0) || 24);
+  // Accepts EITHER a worldConfig object OR the legacy positional args
+  // (seedV, sizeV, addPoles, maxH, crustDepth) — old call sites keep
+  // working while new ones pass the full config.
+  function regenerateWorld(arg, sizeV, addPoles, maxH, crustDepth) {
+    let cfg;
+    if (arg && typeof arg === 'object') {
+      cfg = Object.assign(defaultWorldConfig(), worldConfig, arg);
+    } else {
+      cfg = Object.assign(defaultWorldConfig(), worldConfig, {
+        seed: arg | 0,
+        size: sizeV,
+        polarCaps: !!addPoles,
+        maxHeight: maxH || 30,
+        crust: Math.max(8, (crustDepth | 0) || 24),
+      });
+    }
+    worldConfig = cfg;
+    activeBiome = BIOMES[cfg.biome] || BIOMES.earth;
+    SEED = cfg.seed | 0;
+    W = cfg.size; D = cfg.size;
+    polesEnabled = !!cfg.polarCaps;
+    maxTerrainH = cfg.maxHeight || 30;
+    DEPTH = Math.max(8, (cfg.crust | 0) || 24);
+    sheepRatePct = cfg.sheepPct;
     _seed = SEED;
     const k = W / 1024;
     const e1 = makeNoise(W, D, 96 * k);
@@ -1052,23 +1490,21 @@ void main() {
     // Polar ice caps: blend each tile's elev toward snow-biome at extreme
     // latitudes. The bias kicks in over the top/bottom ~35% of latitudes and
     // ramps to full snow at the actual pole.
-    if (polesEnabled) {
+    if (polesEnabled && activeBiome.polarStyle !== 'none') {
+      const wantWet = activeBiome.polarStyle === 'snow';
       for (let tz = 0; tz < D; tz++) {
         const lat = (tz / D - 0.5) * Math.PI;            // -π/2 .. π/2
         const polarity = Math.abs(lat) / (Math.PI / 2);  // 0 equator → 1 pole
-        // Bigger caps — kicks in earlier (40% out from equator) and ramps
-        // hard so the polar regions read as proper continents of ice.
         const cold = Math.max(0, (polarity - 0.40) / 0.60);
         const cold2 = cold * cold;                        // ease in
         if (cold2 > 0) {
           for (let tx = 0; tx < W; tx++) {
             const i = tz * W + tx;
-            // Target low icy plateau (just above sea level) instead of the
-            // tallest-mountain band (0.92) — old value made the poles render
-            // as mountain ranges. Tiny noise wiggle prevents a glassy plane.
             const plateau = 0.50 + (e1[i] - 0.5) * 0.04;
             elev[i] = elev[i] * (1 - cold2) + plateau * cold2;
-            moist[i] = Math.max(moist[i], 0.6);            // keep snow color cool
+            // Wet poles → push moisture up so the snow biome triggers.
+            // Sand poles → leave moisture alone (paler dune at high lat).
+            if (wantWet) moist[i] = Math.max(moist[i], 0.6);
           }
         }
       }
@@ -1078,6 +1514,10 @@ void main() {
     heights = new Int16Array(W * D);
     water = new Uint8Array(W * D);
     pierced = new Uint8Array(W * D);
+    // Per-tile thermal state. 0 = frozen, 128 = ambient, 255 = molten.
+    // Future: water+lava → steam, lava cools to obsidian, ice melts when
+    // hit by warmth, etc. For now it's a readable data layer + minimap.
+    tileTemp = new Uint8Array(W * D);
     treesAt = new Uint8Array(W * D);
     treesPlaced = false;
     waterDirty = true;
@@ -1094,10 +1534,16 @@ void main() {
       else if (e < 0.82) h = Math.round((11 + (e - 0.70) * 55) * heightScale);
       else               h = Math.round((18 + (e - 0.82) * 70) * heightScale);
       heights[i] = Math.max(1, Math.min(H_MAX - 1, h));
+      // Seed thermal state from the biome's surface band. Each biome can
+      // override via biome.surfaceTemp(e, m) → 0..255; otherwise we infer
+      // from "is it cold-looking, lava-band, or normal" via R/B in color.
+      tileTemp[i] = sampleBiomeTemp(activeBiome, e, moist[i]);
       // Real water in the ocean biomes. Fill UP TO a single sea level so the
       // ocean surface is flat regardless of seabed depth — varying seabed +
       // fixed water amount was rendering as stepped terraces.
-      if (e < 0.42) {
+      // Skip water-fill on biomes that don't have liquid water (e.g.
+      // volcanic, where the "ocean" band is exposed glowing lava).
+      if (e < 0.42 && activeBiome.hasOcean !== false) {
         const SEA_LEVEL = 3;
         const need = SEA_LEVEL - heights[i];
         if (need > 0) water[i] = need;
@@ -1114,14 +1560,9 @@ void main() {
     if (x < 0 || z < 0 || x >= W || z >= D) return -1;
     return heights[z * W + x];
   }
+  // Surface color dispatcher — delegates to the active biome.
   function biomeColor(e, m) {
-    if (e < 0.35) return [0.07, 0.16, 0.38];
-    if (e < 0.42) return [0.18, 0.40, 0.68];
-    if (e < 0.46) return [0.86, 0.78, 0.55];
-    if (e < 0.70) return m < 0.45 ? [0.55, 0.67, 0.31] : [0.27, 0.51, 0.24];
-    if (e < 0.82) return [0.35, 0.31, 0.24];
-    return [0.74, 0.76, 0.80];     // snow — kept below bloom threshold so
-                                    // polar caps don't glow like the sun
+    return activeBiome.surfaceColor(e, m);
   }
   // Sparse map of per-column deposit stacks: tile-index → array of [r,g,b].
   // Each entry is a voxel that was *dropped* on top of that column (by tractor
@@ -1153,22 +1594,28 @@ void main() {
     // here line up across columns regardless of how tall each one started.
     const noise = ((x * 73856093) ^ (z * 19349663) ^ ((y * 83492791) | 0)) >>> 0;
     const j = ((noise % 41) / 41 - 0.5) * 0.07;     // ±0.035 brightness wobble
+    // Tint applied to non-magma strata so each biome reads through to the
+    // exposed cliff faces. Magma stays neutral so it always glows orange
+    // regardless of biome.
+    const tR = activeBiome.strataTint[0];
+    const tG = activeBiome.strataTint[1];
+    const tB = activeBiome.strataTint[2];
 
     // Above sea level — mountain interior exposed by a cliff face. Always
     // a thin dirt cap right under the biome surface, then sandstone deeper.
     if (y > 0) {
-      if (origTop - y <= 2) return [0.46 + j, 0.32 + j, 0.20 + j];
-      return [0.62 + j, 0.55 + j, 0.42 + j];
+      if (origTop - y <= 2) return [(0.46 + j) * tR, (0.32 + j) * tG, (0.20 + j) * tB];
+      return [(0.62 + j) * tR, (0.55 + j) * tG, (0.42 + j) * tB];
     }
 
     // Below sea level — strata as a fraction of the radial distance from
     // sea level to bedrock. Same sequence at any DEPTH (thin to solid).
     const f = (-y) / Math.max(1, DEPTH);            // 0 at sea level → 1 at bedrock
-    if (f < 0.04) return [0.46 + j, 0.32 + j, 0.20 + j];   // dirt right under sea level
-    if (f < 0.16) return [0.62 + j, 0.55 + j, 0.42 + j];   // sandstone / pale rock
-    if (f < 0.34) return [0.50 + j, 0.50 + j, 0.52 + j];   // grey stone
-    if (f < 0.55) return [0.36 + j, 0.34 + j, 0.36 + j];   // darker stone
-    if (f < 0.72) return [0.24 + j, 0.22 + j, 0.26 + j];   // bedrock
+    if (f < 0.04) return [(0.46 + j) * tR, (0.32 + j) * tG, (0.20 + j) * tB];
+    if (f < 0.16) return [(0.62 + j) * tR, (0.55 + j) * tG, (0.42 + j) * tB];
+    if (f < 0.34) return [(0.50 + j) * tR, (0.50 + j) * tG, (0.52 + j) * tB];
+    if (f < 0.55) return [(0.36 + j) * tR, (0.34 + j) * tG, (0.36 + j) * tB];
+    if (f < 0.72) return [(0.24 + j) * tR, (0.22 + j) * tG, (0.26 + j) * tB];
     if (f < 0.85) return [0.50 + j*0.4, 0.20, 0.10];       // hot rock w/ iron veins
     return [2.4, 0.95, 0.22];                               // magma — thicker layer, emissive
   }
@@ -1331,8 +1778,19 @@ void main() {
   function buildTreesMesh() {
     const v = [], idx = [];
     // Caps total tree count — bigger worlds get sparser trees so we don't
-    // upload tens of MB of vegetation geometry.
-    const targetTrees = Math.min(5000, Math.floor(W * D * 0.04));
+    // upload tens of MB of vegetation geometry. Multiplied by biome veg
+    // profile + the worldConfig life/treeDensity sliders so a "Dead" world
+    // ends up barren and a "Teeming Jungle" packs the canopy.
+    const treeMul = (activeBiome.veg ? activeBiome.veg.treeRate : 1)
+                  * (worldConfig.treeDensity || 1)
+                  * (worldConfig.life ?? 1);
+    const targetTrees = Math.floor(Math.min(5000, W * D * 0.04) * treeMul);
+    if (targetTrees <= 0) {
+      treeIdxCount = 0;
+      treesPlaced = true;
+      treesDirty = false;
+      return;
+    }
     const eligible = [];
     for (let z = 0; z < D; z++) {
       for (let x = 0; x < W; x++) {
@@ -1398,8 +1856,11 @@ void main() {
       // it past the bloom threshold AND trigger the warm-fragment shader
       // pulse, so the burning tree itself flickers without per-frame
       // mesh rebuilds.
+      // Biome-tinted alive trunk; charred + emissive states are biome-agnostic
+      // (a burning tree looks the same everywhere).
+      const tt = activeBiome.veg && activeBiome.veg.treeTrunkTint || [1,1,1];
       const trunkCol =
-        state === 1 ? [0.34, 0.22, 0.13] :
+        state === 1 ? [0.34 * tt[0], 0.22 * tt[1], 0.13 * tt[2]] :
         state === 2 ? [2.4, 0.85, 0.18] :       // emissive — glows + pulses
                       [0.08, 0.06, 0.05];        // charred, dead-cold
       // Burnt trunks stay at a hash-driven random fraction of original
@@ -1413,11 +1874,15 @@ void main() {
       // Canopy only on alive or burning trees. State 2 canopy turns warm
       // orange to look like leaves on fire (bloom + warm pulse pick it up).
       if (state !== 3) {
-        const cR = 0.22 + (h & 7) * 0.012;
-        const cG = 0.50 + ((h >> 3) & 7) * 0.018;
+        // Biome canopy tint applied to alive trees; burning canopy stays
+        // emissive orange so the bloom + warm-pulse path still lights up.
+        const ct = activeBiome.veg && activeBiome.veg.treeCanopyTint || [1,1,1];
+        const cR = (0.22 + (h & 7) * 0.012)        * ct[0];
+        const cG = (0.50 + ((h >> 3) & 7) * 0.018) * ct[1];
+        const cB = 0.18                            * ct[2];
         const canopyCol = state === 2
           ? [2.0, 0.55, 0.12]
-          : [cR, cG, 0.18];
+          : [cR, cG, cB];
         pushPiece(cx - canopyR, cy + trunkH * 0.7,                cz - canopyR,
                   cx + canopyR, cy + trunkH * 0.7 + canopyH,      cz + canopyR,
                   canopyCol);
@@ -1464,7 +1929,17 @@ void main() {
     }
     // Cap so big worlds don't allocate insane meshes. Grass is denser than
     // trees but each tuft is way smaller in geometry.
-    const targetTufts = Math.min(12000, Math.floor(W * D * 0.10));
+    // Biome × worldConfig grass density.
+    const grassMul = (activeBiome.veg ? activeBiome.veg.grassRate : 1)
+                   * (worldConfig.grassDensity || 1)
+                   * (worldConfig.life ?? 1);
+    const targetTufts = Math.floor(Math.min(12000, W * D * 0.10) * grassMul);
+    if (targetTufts <= 0) {
+      grassIdxCount = 0;
+      grassPlaced = true;
+      grassDirty = false;
+      return;
+    }
     if (grassAt.length !== W * D) grassAt = new Uint8Array(W * D);
     const eligible = [];
     for (let z = 0; z < D; z++) {
@@ -1497,10 +1972,12 @@ void main() {
       const cy = heights[i];
       // 2–4 blades per tuft, scattered within the tile footprint.
       const blades = 2 + ((h >> 5) & 3);                // 2..5
-      // Slightly varied green per tuft so the meadow has subtle patches.
-      const baseG = 0.42 + ((h >> 9)  & 31) / 31 * 0.28;
-      const baseR = 0.16 + ((h >> 14) & 15) / 15 * 0.12;
-      const baseB = 0.10 + ((h >> 18) & 15) / 15 * 0.08;
+      // Slightly varied green per tuft so the meadow has subtle patches,
+      // then tinted by the active biome so e.g. alien grass is magenta.
+      const gt = activeBiome.veg && activeBiome.veg.grassTint || [1,1,1];
+      const baseG = (0.42 + ((h >> 9)  & 31) / 31 * 0.28) * gt[1];
+      const baseR = (0.16 + ((h >> 14) & 15) / 15 * 0.12) * gt[0];
+      const baseB = (0.10 + ((h >> 18) & 15) / 15 * 0.08) * gt[2];
       for (let b = 0; b < blades; b++) {
         const bh = ((h >> (b * 4)) ^ (b * 2654435761)) >>> 0;
         const bx = ((bh & 0xFF) / 255 - 0.5) * 0.7;
@@ -1557,7 +2034,7 @@ void main() {
 
   // Percentage of grass tiles that should get a sheep — driven by the
   // settings slider so users can crank it up or zero it out.
-  let sheepRatePct = 5;
+  // (sheepRatePct itself is hoisted up alongside worldConfig.)
 
   function spawnSheep() {
     sheep.length = 0;
@@ -1934,6 +2411,22 @@ void main() {
         life: 5 + Math.random() * 10,        // 5–15s burn time per tree
         emitT: 0,
       });
+      // Thermal: hot fire on the tile + warm halo on immediate neighbors
+      // so the heat-map preview of a forest fire reads as a glow front.
+      if (tileTemp.length === W * D) {
+        tileTemp[ti] = Math.max(tileTemp[ti], 230);
+        const tzz = (ti / W) | 0;
+        const txx = ti - tzz * W;
+        for (let ddz = -1; ddz <= 1; ddz++) {
+          for (let ddx = -1; ddx <= 1; ddx++) {
+            if (!ddx && !ddz) continue;
+            const ntx = ((txx + ddx) % W + W) % W;
+            const ntz = Math.max(0, Math.min(D - 1, tzz + ddz));
+            const nti = ntz * W + ntx;
+            tileTemp[nti] = Math.max(tileTemp[nti], 175);
+          }
+        }
+      }
     } else {
       treesAt[ti] = 0;        // straight removal — no fire path
     }
@@ -2028,9 +2521,16 @@ void main() {
           }
         }
       }
-      // Burn done → charred stump.
+      // Keep the heat-map cell hot while the tree burns — older damage
+      // could have driven temp down (e.g. water poured on it later).
+      if (tileTemp.length === W * D) {
+        if (tileTemp[b.ti] < 220) tileTemp[b.ti] = 220;
+      }
+      // Burn done → charred stump. Tile cools to "smoldering coals" so
+      // the heat map still shows the scar but it's no longer fire-hot.
       if (b.t >= b.life) {
         if (treesAt[b.ti] === 2) treesAt[b.ti] = 3;
+        if (tileTemp.length === W * D) tileTemp[b.ti] = 170;
         treesDirty = true;
         burningTrees.splice(i, 1);
       }
@@ -2453,7 +2953,17 @@ void main() {
   let lugiaLength = 0;        // beam length (saucer → far exit)
   let lugiaPower = 1;         // 0..1 — drives beam thickness in render
   const LUGIA_CHARGE = 3.0;
-  const LUGIA_FIRE = 1.2;
+  // Firing is a series of dramatic bangs, not one long beam. Each bang
+  // strobes the planet-piercing pipe with its own muzzle flash, and the
+  // gaps between bangs let the visual breathe. Total firing window =
+  // LUGIA_BANG_COUNT × LUGIA_BANG_INTERVAL.
+  const LUGIA_BANG_COUNT    = 4;
+  const LUGIA_BANG_INTERVAL = 0.55;        // seconds between bang starts
+  const LUGIA_BANG_DUR      = 0.32;        // visible portion of each bang
+  const LUGIA_FIRE          = LUGIA_BANG_COUNT * LUGIA_BANG_INTERVAL;
+  // Index of the most recent bang we've already triggered (for detecting
+  // new-bang frames so each one spawns its own flash light + sfx hooks).
+  let lugiaLastBangIdx = -1;
 
   // Steam puff at a tile that just lost water to a Lugia tunnel — small,
   // bright, rises radially. Uses the existing isDust particle path.
@@ -2978,6 +3488,8 @@ void main() {
         markTileDirty(wtx, wtz);
         destroyTree(ti);
         destroyGrassAt(ti);
+        // Nuke crater glows hot on the heat map.
+        if (tileTemp.length === W * D) tileTemp[ti] = 250;
         if (water[ti] > 0) { water[ti] = 0; waterDirty = true; }
       }
     }
@@ -3104,6 +3616,8 @@ void main() {
         markTileDirty(wtx, wtz);
         destroyTree(ti);
         destroyGrassAt(ti);
+        // Crater = thermal scar on the temperature map.
+        if (tileTemp.length === W * D) tileTemp[ti] = 200;
         // Water flash-vaporizes wherever the crater eats its column.
         if (water[ti] > 0) {
           water[ti] = Math.max(0, water[ti] - depth);
@@ -3739,6 +4253,33 @@ void main() {
   const mapCtx     = mapCanvas.getContext('2d');
   const mapMeta    = document.getElementById('map-meta');
 
+  // Two render modes for the world map: 'biome' (current default) and
+  // 'temp' (heat ramp from cold blue → ambient white → hot red).
+  let mapMode = 'biome';
+  // Heat ramp: 0=deep blue, 64=cool teal, 128=neutral pale, 192=warm
+  // amber, 255=blinding magma red. Smoothly interpolated between stops.
+  function tempColor(t) {
+    const stops = [
+      [0,   [10, 30, 90]],
+      [64,  [40, 110, 200]],
+      [128, [220, 220, 220]],
+      [192, [255, 160, 50]],
+      [255, [255, 60, 20]],
+    ];
+    for (let i = 0; i < stops.length - 1; i++) {
+      const [a, ca] = stops[i], [b, cb] = stops[i + 1];
+      if (t <= b) {
+        const k = (t - a) / (b - a);
+        return [
+          ca[0] + (cb[0] - ca[0]) * k,
+          ca[1] + (cb[1] - ca[1]) * k,
+          ca[2] + (cb[2] - ca[2]) * k,
+        ];
+      }
+    }
+    return stops[stops.length - 1][1];
+  }
+
   function renderMap() {
     const Wm = mapCanvas.width, Hm = mapCanvas.height;
     const img = mapCtx.createImageData(Wm, Hm);
@@ -3749,17 +4290,14 @@ void main() {
       for (let x = 0; x < Wm; x++) {
         const tx = Math.floor(x * W / Wm);
         const i = tz * W + tx;
-        const e = elev[i], m = moist[i];
         let r, g, b;
-        if (e < 0.35)      { r = 30;  g = 60;  b = 120; }
-        else if (e < 0.42) { r = 50;  g = 100; b = 170; }
-        else if (e < 0.46) { r = 220; g = 200; b = 140; }
-        else if (e < 0.70) {
-          if (m < 0.45)    { r = 140; g = 170; b = 80;  }
-          else             { r = 70;  g = 130; b = 60;  }
+        if (mapMode === 'temp' && tileTemp.length === W * D) {
+          const c = tempColor(tileTemp[i]);
+          r = c[0] | 0; g = c[1] | 0; b = c[2] | 0;
+        } else {
+          const mc = activeBiome.mapColor(elev[i], moist[i]);
+          r = mc[0]; g = mc[1]; b = mc[2];
         }
-        else if (e < 0.82) { r = 90;  g = 80;  b = 60;  }
-        else               { r = 220; g = 220; b = 230; }
         buf[y * Wm + x] = (255 << 24) | (b << 16) | (g << 8) | r;
       }
     }
@@ -3828,6 +4366,16 @@ void main() {
 
   document.getElementById('open-settings').addEventListener('click', openSettings);
 
+  // Map mode toggle — biome vs temperature.
+  document.getElementById('map-mode-biome').addEventListener('click', () => {
+    mapMode = 'biome';
+    renderMap();
+  });
+  document.getElementById('map-mode-temp').addEventListener('click', () => {
+    mapMode = 'temp';
+    renderMap();
+  });
+
   // Fullscreen toggle. Uses Element.requestFullscreen + the older webkit
   // variant for Safari. Works on macOS too — in macOS fullscreen mode the
   // notch disappears behind the page (which is what viewport-fit=cover
@@ -3858,16 +4406,11 @@ void main() {
   });
   addEventListener('keydown', e => { if (e.key === 'Escape') closeSettings(); });
 
-  document.getElementById('generate-world').addEventListener('click', () => {
-    const seedInput = document.getElementById('gen-seed');
-    const sizeSel = document.getElementById('gen-size');
-    const seed = seedInput.value !== '' ? parseInt(seedInput.value, 10)
-                                        : Math.floor(Math.random() * 1e9);
-    const size = parseInt(sizeSel.value, 10);
-    const poles = document.getElementById('gen-poles').checked;
-    const maxH = parseInt(document.getElementById('gen-maxh').value, 10);
-    const crust = parseInt(document.getElementById('gen-crust').value, 10);
-    regenerateWorld(seed, size, poles, maxH, crust);
+  // Shared apply path: takes a worldConfig, runs the regen + rebuilds all
+  // dependent meshes/state, and resets the saucer. Used by both the
+  // in-game settings dialog and the new world-gen screen.
+  function applyAndGenerate(cfg) {
+    regenerateWorld(cfg);
     initChunks();
     rebuildAllChunksNow();
     buildTreesMesh();
@@ -3878,12 +4421,165 @@ void main() {
     ufo.fwdX = 0; ufo.fwdY = 1; ufo.fwdZ = 0;        // north at lat=0, lon=0
     ufo.speed = 0;
     document.getElementById('info').textContent =
-      `${W}×${D} world, ${heights.length.toLocaleString()} columns, ` +
+      `${W}×${D} ${activeBiome.name} world, ${heights.length.toLocaleString()} columns, ` +
       `${totalChunkTriangles().toLocaleString()} triangles, ${sheep.length} sheep`;
-    seedInput.value = SEED;
-    mapMeta.textContent = `seed ${SEED} · ${W}×${D} tiles · max h ${maxTerrainH}${polesEnabled ? ' · poles' : ''}`;
+    mapMeta.textContent =
+      `seed ${SEED} · ${activeBiome.emoji} ${activeBiome.name} · ${W}×${D}` +
+      ` · max h ${maxTerrainH}${polesEnabled ? ' · poles' : ''}`;
     renderMap();
+  }
+
+  document.getElementById('generate-world').addEventListener('click', () => {
+    const seedInput = document.getElementById('gen-seed');
+    const sizeSel = document.getElementById('gen-size');
+    const seed = seedInput.value !== '' ? parseInt(seedInput.value, 10)
+                                        : Math.floor(Math.random() * 1e9);
+    applyAndGenerate({
+      seed,
+      size:      parseInt(sizeSel.value, 10),
+      polarCaps: document.getElementById('gen-poles').checked,
+      maxHeight: parseInt(document.getElementById('gen-maxh').value, 10),
+      crust:     parseInt(document.getElementById('gen-crust').value, 10),
+      sheepPct:  sheepRatePct,
+      // In-game settings dialog keeps the current biome & life sliders;
+      // pass the existing worldConfig values through.
+      biome:        worldConfig.biome,
+      life:         worldConfig.life,
+      treeDensity:  worldConfig.treeDensity,
+      grassDensity: worldConfig.grassDensity,
+    });
+    seedInput.value = SEED;
   });
+
+  // ---------- World-gen screen ----------
+  // Shown on app load. Same applyAndGenerate path; just a different
+  // shell. Biome cards drive the planet preset; sliders fine-tune.
+  const wgBg       = document.getElementById('worldgen-bg');
+  const wgBiomes   = document.getElementById('wg-biomes');
+  const wgLife     = document.getElementById('wg-life');
+  const wgLifeVal  = document.getElementById('wg-life-val');
+  const wgTrees    = document.getElementById('wg-trees');
+  const wgTreesVal = document.getElementById('wg-trees-val');
+  const wgGrass    = document.getElementById('wg-grass');
+  const wgGrassVal = document.getElementById('wg-grass-val');
+  const wgSheep    = document.getElementById('wg-sheep');
+  const wgSheepVal = document.getElementById('wg-sheep-val');
+  const wgSize     = document.getElementById('wg-size');
+  const wgMaxh     = document.getElementById('wg-maxh');
+  const wgMaxhVal  = document.getElementById('wg-maxh-val');
+  const wgCrust    = document.getElementById('wg-crust');
+  const wgCrustVal = document.getElementById('wg-crust-val');
+  const wgPoles    = document.getElementById('wg-poles');
+  const wgSeed     = document.getElementById('wg-seed');
+  const wgReroll   = document.getElementById('wg-reroll');
+  const wgGen      = document.getElementById('wg-generate');
+
+  let wgSelectedBiome = 'earth';
+  function renderBiomeCards() {
+    wgBiomes.innerHTML = '';
+    for (const id of Object.keys(BIOMES)) {
+      const b = BIOMES[id];
+      const card = document.createElement('div');
+      card.className = 'biome-card' + (id === wgSelectedBiome ? ' selected' : '');
+      card.innerHTML = `
+        <div class="emoji">${b.emoji}</div>
+        <div class="name">${b.name}</div>
+      `;
+      card.addEventListener('click', () => {
+        wgSelectedBiome = id;
+        renderBiomeCards();
+      });
+      wgBiomes.appendChild(card);
+    }
+  }
+  renderBiomeCards();
+
+  // Live readouts.
+  function lifeLabel(v) {
+    if (v < 15) return 'Dead';
+    if (v < 35) return 'Sparse';
+    if (v < 65) return 'Alive';
+    if (v < 90) return 'Lush';
+    return 'Teeming';
+  }
+  wgLife.addEventListener('input', () => {
+    wgLifeVal.textContent = lifeLabel(parseInt(wgLife.value, 10));
+  });
+  wgLifeVal.textContent = lifeLabel(parseInt(wgLife.value, 10));
+  wgTrees.addEventListener('input', () => {
+    wgTreesVal.textContent = wgTrees.value + '%';
+  });
+  wgGrass.addEventListener('input', () => {
+    wgGrassVal.textContent = wgGrass.value + '%';
+  });
+  wgSheep.addEventListener('input', () => {
+    wgSheepVal.textContent = wgSheep.value + '%';
+  });
+  wgMaxh.addEventListener('input', () => {
+    wgMaxhVal.textContent = wgMaxh.value;
+  });
+  wgCrust.addEventListener('input', () => {
+    wgCrustVal.textContent = crustLabel(parseInt(wgCrust.value, 10));
+  });
+  wgCrustVal.textContent = crustLabel(parseInt(wgCrust.value, 10));
+  wgReroll.addEventListener('click', () => {
+    wgSeed.value = (Math.random() * 1e9) | 0;
+  });
+
+  // Show the world-gen screen on first frame so the user lands here
+  // instead of being dropped into the default Earth seed.
+  function openWorldgen() {
+    wgBg.classList.remove('hidden');
+    // Pre-fill from the current worldConfig so reopening it later mirrors
+    // what the player chose last time (when we add a "regenerate" button).
+    wgLife.value  = Math.round((worldConfig.life ?? 0.7) * 100);
+    wgTrees.value = Math.round((worldConfig.treeDensity ?? 1) * 100);
+    wgGrass.value = Math.round((worldConfig.grassDensity ?? 1) * 100);
+    wgSheep.value = String(worldConfig.sheepPct ?? 5);
+    wgSize.value  = String(worldConfig.size ?? 384);
+    wgMaxh.value  = String(worldConfig.maxHeight ?? 30);
+    wgCrust.value = String(worldConfig.crust ?? 180);
+    wgPoles.checked = worldConfig.polarCaps !== false;
+    wgSeed.value  = '';
+    wgSelectedBiome = worldConfig.biome || 'earth';
+    renderBiomeCards();
+    wgLifeVal.textContent  = lifeLabel(parseInt(wgLife.value, 10));
+    wgTreesVal.textContent = wgTrees.value + '%';
+    wgGrassVal.textContent = wgGrass.value + '%';
+    wgSheepVal.textContent = wgSheep.value + '%';
+    wgMaxhVal.textContent  = wgMaxh.value;
+    wgCrustVal.textContent = crustLabel(parseInt(wgCrust.value, 10));
+  }
+  function closeWorldgen() { wgBg.classList.add('hidden'); }
+
+  wgGen.addEventListener('click', () => {
+    const seed = wgSeed.value !== ''
+      ? parseInt(wgSeed.value, 10)
+      : (Math.random() * 1e9) | 0;
+    applyAndGenerate({
+      seed,
+      size:         parseInt(wgSize.value, 10),
+      biome:        wgSelectedBiome,
+      maxHeight:    parseInt(wgMaxh.value, 10),
+      crust:        parseInt(wgCrust.value, 10),
+      polarCaps:    wgPoles.checked,
+      life:         parseInt(wgLife.value, 10) / 100,
+      treeDensity:  parseInt(wgTrees.value, 10) / 100,
+      grassDensity: parseInt(wgGrass.value, 10) / 100,
+      sheepPct:     parseInt(wgSheep.value, 10),
+    });
+    closeWorldgen();
+  });
+
+  // In-game button to re-open the world-gen screen (so the player can
+  // switch biomes / planet types without hunting through settings).
+  document.getElementById('open-worldgen').addEventListener('click', () => {
+    closeSettings();
+    openWorldgen();
+  });
+
+  // Open it on app load.
+  openWorldgen();
 
   // Click on the minimap to teleport. The minimap renders x=0 at lon=0 (the
   // shader maps gridX/W → lon ∈ [0, 2π)), so the inverse maps u → u*2π and
@@ -5011,7 +5707,24 @@ void main() {
       }
     } else if (lugiaState === 'firing') {
       lugiaT += dt;
-      if (lugiaT >= LUGIA_FIRE) { lugiaState = 'idle'; lugiaT = 0; }
+      // Detect when a new bang starts — spawn a blinding-bright muzzle
+      // flash at the orb's location so the cannon visibly thumps each
+      // time the beam re-strobes.
+      const bangIdx = Math.min(LUGIA_BANG_COUNT - 1,
+                                Math.floor(lugiaT / LUGIA_BANG_INTERVAL));
+      if (bangIdx > lugiaLastBangIdx && lugiaOrigin) {
+        lugiaLastBangIdx = bangIdx;
+        // Flash bigger and brighter on later bangs so it builds toward
+        // the final shot — adds dramatic crescendo.
+        const k = (bangIdx + 1) / LUGIA_BANG_COUNT;
+        spawnFlash(lugiaOrigin[0], lugiaOrigin[1], lugiaOrigin[2],
+                   55 + k * 35,
+                   [4.5 * k + 2.0, 5.0 * k + 2.4, 7.0 * k + 3.0],
+                   0.45);
+      }
+      if (lugiaT >= LUGIA_FIRE) {
+        lugiaState = 'idle'; lugiaT = 0; lugiaLastBangIdx = -1;
+      }
     }
 
     // Water cellular automaton — equalizes flow each WATER_TICK seconds.
@@ -5584,38 +6297,104 @@ void main() {
       gl.uniform3f(oTint, 1, 1, 1);
     }
 
-    // ---- Lugia cannon — charge orb on the saucer + planet-piercing beam ----
+    // ---- Lugia cannon — charge orb beneath the saucer + rim halo ----
     if (lugiaState === 'charging') {
       const t = Math.min(1, lugiaT / LUGIA_CHARGE);
-      // Easing: slow start, fast finish — sells the wind-up.
+      // Slow start / fast finish curve sells the wind-up; near full
+      // charge the orb pulses violently as the energy "ripens."
       const e2 = t * t;
-      const scale = 0.6 + e2 * 4.0;
-      const intensity = 0.7 + e2 * 6.0;
-      const flicker = 0.85 + Math.random() * 0.30;
+      const e3 = e2 * t;
+      // Position the orb below the saucer (toward the planet). It drops
+      // a touch farther as it grows so it doesn't clip into the hull.
+      const orbDist  = 0.40 + e2 * 0.45;
+      const orbScale = 0.10 + e3 * 0.95;
+      const ox = ufoPos[0] - upX * orbDist;
+      const oy = ufoPos[1] - upY * orbDist;
+      const oz = ufoPos[2] - upZ * orbDist;
+      // High-frequency flicker scaled by charge — subtle at start, near
+      // strobe at full charge.
+      const flicker = 0.85 + Math.random() * (0.30 + e3 * 0.7);
+      const breathe = 1.0 + 0.18 * Math.sin(now * 0.01 * (3 + e2 * 14));
+      const sNow = orbScale * breathe;
+
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
       gl.depthMask(false);
       gl.disable(gl.CULL_FACE);
-      const om = new Float32Array([
-        scale, 0, 0, 0,
-        0, scale, 0, 0,
-        0, 0, scale, 0,
-        ufoPos[0], ufoPos[1], ufoPos[2], 1,
+
+      // Inner core — small, very bright, hot white-cyan.
+      const coreS = sNow * 0.55;
+      const coreM = new Float32Array([
+        coreS, 0, 0, 0,
+        0, coreS, 0, 0,
+        0, 0, coreS, 0,
+        ox, oy, oz, 1,
       ]);
-      gl.uniformMatrix4fv(oModel, false, om);
-      gl.bindBuffer(gl.ARRAY_BUFFER, pVbo);
+      gl.uniformMatrix4fv(oModel, false, coreM);
+      gl.bindBuffer(gl.ARRAY_BUFFER, moveSphereMesh.vbo);
       gl.vertexAttribPointer(oPos,   3, gl.FLOAT, false, STRIDE, 0);
       gl.vertexAttribPointer(oNorm,  3, gl.FLOAT, false, STRIDE, 12);
       gl.vertexAttribPointer(oColor, 3, gl.FLOAT, false, STRIDE, 24);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, pIbo);
-      gl.uniform3f(oTint, intensity * flicker, intensity * flicker, intensity * flicker);
-      gl.drawElements(gl.TRIANGLES, pIdxCount, idxType, 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, moveSphereMesh.ibo);
+      const coreTint = (1.5 + e3 * 6.0) * flicker;
+      gl.uniform3f(oTint, coreTint, coreTint, coreTint * 1.15);
+      gl.drawElements(gl.TRIANGLES, moveSphereMesh.count, idxType, 0);
+
+      // Outer halo — bigger, softer, cyan-blue. Same mesh, scaled up.
+      const haloS = sNow * 1.45;
+      const haloM = new Float32Array([
+        haloS, 0, 0, 0,
+        0, haloS, 0, 0,
+        0, 0, haloS, 0,
+        ox, oy, oz, 1,
+      ]);
+      gl.uniformMatrix4fv(oModel, false, haloM);
+      const haloTint = (0.55 + e2 * 1.6) * flicker;
+      gl.uniform3f(oTint, haloTint * 0.6, haloTint * 0.85, haloTint * 1.2);
+      gl.drawElements(gl.TRIANGLES, moveSphereMesh.count, idxType, 0);
+
+      // Saucer rim halo — flat disc at the saucer's level, glowing with
+      // the same energy as the orb. Scaled wider than the saucer so it
+      // reads as a ring of light around the hull edge.
+      const rimR = 0.95 + e2 * 0.35;
+      const rimY = 0.05;        // very flat — basically a disc
+      const rimM = new Float32Array([
+        eastX  * rimR, eastY  * rimR, eastZ  * rimR, 0,
+        upX    * rimY, upY    * rimY, upZ    * rimY, 0,
+        northX * rimR, northY * rimR, northZ * rimR, 0,
+        ufoPos[0], ufoPos[1], ufoPos[2], 1,
+      ]);
+      gl.uniformMatrix4fv(oModel, false, rimM);
+      const rimTint = (0.30 + e3 * 3.0) * flicker;
+      gl.uniform3f(oTint, rimTint * 0.55, rimTint * 0.95, rimTint * 1.30);
+      gl.drawElements(gl.TRIANGLES, moveSphereMesh.count, idxType, 0);
+
       gl.uniform3f(oTint, 1, 1, 1);
       gl.depthMask(true);
       gl.disable(gl.BLEND);
       gl.enable(gl.CULL_FACE);
     }
     if (lugiaState === 'firing' && lugiaOrigin && lugiaAxis) {
+      // Multi-bang strobe: the beam isn't on continuously — it pulses on
+      // for LUGIA_BANG_DUR seconds, off for the gap until the next bang.
+      // Each pulse fades in→peak→out via sin so the cuts feel like
+      // hammer strikes rather than abrupt on/off.
+      const bangIdx  = Math.min(LUGIA_BANG_COUNT - 1,
+                                Math.floor(lugiaT / LUGIA_BANG_INTERVAL));
+      const bangPhase = lugiaT - bangIdx * LUGIA_BANG_INTERVAL;
+      const inBang   = bangPhase < LUGIA_BANG_DUR;
+      // 0..1..0 envelope inside the bang's "on" window.
+      const bangAmp  = inBang
+        ? Math.sin((bangPhase / LUGIA_BANG_DUR) * Math.PI)
+        : 0;
+      // Crescendo: each bang is brighter than the last so the final
+      // pulse reads as the climax.
+      const climb    = (bangIdx + 1) / LUGIA_BANG_COUNT;
+      const beamPow  = bangAmp * (0.55 + climb * 0.6);
+      // If we're between bangs, skip the beam draw entirely — but still
+      // let the multi-bang loop run (state machine ticks elsewhere).
+      if (beamPow <= 0.01) { /* fall through to the rest of the frame */ }
+      else {
       // Build a model matrix where local +Y points along the beam axis
       // (so y=-1 is at the far exit). Length is encoded in the Y column.
       // Extend past the exit so the beam visibly punches out the back side.
@@ -5642,9 +6421,9 @@ void main() {
         zx, zy, zz, 0,
         lugiaOrigin[0], lugiaOrigin[1], lugiaOrigin[2], 1,
       ]);
-      // Fade out toward the end of the firing window. Start blinding-bright.
-      const tt = lugiaT / LUGIA_FIRE;
-      const fade = 1 - tt * tt;
+      // Per-bang intensity supersedes the old continuous fade so the
+      // beam visibly bangs N times instead of fading once.
+      const fade    = beamPow;
       const flicker = 0.9 + Math.random() * 0.20;
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
@@ -5669,6 +6448,40 @@ void main() {
       gl.uniform3f(oTint, 1, 1, 1);
       gl.depthMask(true);
       gl.enable(gl.DEPTH_TEST);
+      gl.disable(gl.BLEND);
+      gl.enable(gl.CULL_FACE);
+      } // end else (beamPow > 0.01)
+
+      // Persistent muzzle orb at the saucer underside during firing —
+      // pulses bright on each bang and shrinks to a steady glow between
+      // shots so the cannon visibly thumps without leaving empty silence.
+      const muzzleScale = 0.55 + beamPow * 0.95;
+      const muzzleDist  = 0.55 + beamPow * 0.30;
+      const mx = ufoPos[0] - upX * muzzleDist;
+      const my = ufoPos[1] - upY * muzzleDist;
+      const mz = ufoPos[2] - upZ * muzzleDist;
+      const mFlick = 0.85 + Math.random() * 0.30;
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+      gl.depthMask(false);
+      gl.disable(gl.CULL_FACE);
+      const mm = new Float32Array([
+        muzzleScale, 0, 0, 0,
+        0, muzzleScale, 0, 0,
+        0, 0, muzzleScale, 0,
+        mx, my, mz, 1,
+      ]);
+      gl.uniformMatrix4fv(oModel, false, mm);
+      gl.bindBuffer(gl.ARRAY_BUFFER, moveSphereMesh.vbo);
+      gl.vertexAttribPointer(oPos,   3, gl.FLOAT, false, STRIDE, 0);
+      gl.vertexAttribPointer(oNorm,  3, gl.FLOAT, false, STRIDE, 12);
+      gl.vertexAttribPointer(oColor, 3, gl.FLOAT, false, STRIDE, 24);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, moveSphereMesh.ibo);
+      const mTint = (0.6 + beamPow * 8.0) * mFlick;
+      gl.uniform3f(oTint, mTint * 0.85, mTint * 1.0, mTint * 1.25);
+      gl.drawElements(gl.TRIANGLES, moveSphereMesh.count, idxType, 0);
+      gl.uniform3f(oTint, 1, 1, 1);
+      gl.depthMask(true);
       gl.disable(gl.BLEND);
       gl.enable(gl.CULL_FACE);
     }
