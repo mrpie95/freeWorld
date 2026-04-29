@@ -1439,6 +1439,13 @@ void main() {
   let water = new Uint8Array(0);
   let pierced = new Uint8Array(0);          // 1 where a Lugia beam tore through
   let tileTemp = new Uint8Array(0);         // thermal state, 0=frozen→255=molten
+  // Per-column hole bitmap. Sparse: only allocated for columns that have
+  // had voxels carved away. holes[ti] is a Uint8Array sized [DEPTH+H_MAX]
+  // indexed by `y + DEPTH` (so y=-DEPTH..H_MAX-1 maps to 0..DEPTH+H_MAX-1).
+  // 1 = explicit air pocket inside the column. Lets us carve real cave
+  // shapes with overhangs without allocating volumetric voxels for the
+  // entire planet — only touched columns pay any memory.
+  let holes = Object.create(null);
   let origHeights = new Int16Array(0);      // heights as procedurally generated
   // Tree state per tile: 0 = none, 1 = alive, 2 = burning, 3 = burnt stump.
   let treesAt = new Uint8Array(0);
@@ -1514,6 +1521,7 @@ void main() {
     heights = new Int16Array(W * D);
     water = new Uint8Array(W * D);
     pierced = new Uint8Array(W * D);
+    holes = Object.create(null);             // wipe carve-state on regen
     // Per-tile thermal state. 0 = frozen, 128 = ambient, 255 = molten.
     // Future: water+lava → steam, lava cools to obsidian, ice melts when
     // hit by warmth, etc. For now it's a readable data layer + minimap.
@@ -1559,6 +1567,122 @@ void main() {
   function heightAt(x, z) {
     if (x < 0 || z < 0 || x >= W || z >= D) return -1;
     return heights[z * W + x];
+  }
+  // ---- Hole bitmap helpers --------------------------------------
+  // The hole bitmap is *sparse*: a column's Uint8Array is allocated lazily
+  // the first time something carves into it. Untouched columns keep
+  // null and pay zero memory. Index encodes y in [-DEPTH..H_MAX-1] as
+  // `y + DEPTH`, so 0 = bottom magma, top = surface ceiling.
+  function ensureHoles(ti) {
+    let arr = holes[ti];
+    if (!arr) {
+      arr = new Uint8Array(DEPTH + H_MAX);
+      holes[ti] = arr;
+    }
+    return arr;
+  }
+  function isHole(ti, y) {
+    const arr = holes[ti];
+    if (!arr) return false;
+    const idx = y + DEPTH;
+    if (idx < 0 || idx >= arr.length) return false;
+    return arr[idx] === 1;
+  }
+  function setHole(ti, y) {
+    const arr = ensureHoles(ti);
+    const idx = y + DEPTH;
+    if (idx < 0 || idx >= arr.length) return;
+    arr[idx] = 1;
+  }
+  // Carve a 3D sphere of voxels into the hole bitmap. This is what gives
+  // explosions real volumetric craters with overhangs — instead of just
+  // lowering each column's height, we mark a sphere of voxels as air.
+  // Returns the array of affected tile indices so the caller can mark
+  // chunk-rebuild dirty bits.
+  function carveExplosionSphere(cx, cy, cz, radius) {
+    const r0 = Math.hypot(cx, cy, cz) || 1;
+    const lat = Math.asin(Math.max(-1, Math.min(1, cy / r0)));
+    const lon = Math.atan2(cz, cx);
+    const ctxT = Math.floor((((lon / (2 * Math.PI)) % 1) + 1) % 1 * W);
+    const ctzT = Math.max(0, Math.min(D - 1,
+      Math.floor((lat + Math.PI / 2) / Math.PI * D)));
+    // World-units → tile-counts. Approx: W tiles span 2πR at the equator,
+    // so 1 tile ≈ (2πR/W) world units. Scale dx by 1/cos(lat) so the
+    // bounding box covers a circular arc.
+    const equatorTilesPerUnit = W / (2 * Math.PI * PLANET_R);
+    const lonScale = Math.max(0.05, Math.cos(lat));
+    const tileRz = Math.ceil(radius * equatorTilesPerUnit);
+    const tileRx = Math.ceil(radius * equatorTilesPerUnit / lonScale);
+    const r2 = radius * radius;
+    const affected = [];
+    for (let dz = -tileRz; dz <= tileRz; dz++) {
+      for (let dx = -tileRx; dx <= tileRx; dx++) {
+        const wtx = ((ctxT + dx) % W + W) % W;
+        const wtz = Math.max(0, Math.min(D - 1, ctzT + dz));
+        const ti = wtz * W + wtx;
+        const oldH = heights[ti];
+        if (oldH <= -DEPTH) continue;
+        // Column unit vector.
+        const tlat = ((wtz + 0.5) / D) * Math.PI - Math.PI / 2;
+        const tlon = ((wtx + 0.5) / W) * 2 * Math.PI;
+        const cl = Math.cos(tlat), sl = Math.sin(tlat);
+        const co = Math.cos(tlon), so = Math.sin(tlon);
+        const ux = cl * co, uy = sl, uz = cl * so;
+        // For each voxel currently solid in the column, test 3D distance
+        // to the impact point. Mark hole if inside the sphere.
+        let touched = false;
+        for (let y = oldH - 1; y >= -DEPTH; y--) {
+          if (isHole(ti, y)) continue;
+          const vr = PLANET_R + (y + 0.5) * HEIGHT_SCALE;
+          const vx = ux * vr, vy = uy * vr, vz = uz * vr;
+          const ddx = vx - cx, ddy = vy - cy, ddz = vz - cz;
+          if (ddx * ddx + ddy * ddy + ddz * ddz <= r2) {
+            setHole(ti, y);
+            touched = true;
+          }
+        }
+        if (touched) {
+          // Recompute heights[ti] = "topmost solid voxel + 1" so the
+          // surface above is still recognised as air. If the top
+          // voxels survived, heights stays put (overhang case). If they
+          // were carved away, heights drops to the new exposed top.
+          let newTop = -DEPTH - 1;
+          for (let y = oldH - 1; y >= -DEPTH; y--) {
+            if (!isHole(ti, y)) { newTop = y; break; }
+          }
+          heights[ti] = newTop + 1;
+          // Trees / grass / water above the new height fall away.
+          if (water[ti] > 0 && newTop + 1 < oldH) {
+            water[ti] = 0;
+            waterDirty = true;
+          }
+          if (newTop + 1 < oldH) {
+            destroyTree(ti);
+            destroyGrassAt(ti);
+          }
+          // Heat scar.
+          if (tileTemp.length === W * D) tileTemp[ti] = 240;
+          markTileDirty(wtx, wtz);
+          affected.push(ti);
+        }
+      }
+    }
+    return affected;
+  }
+
+  // Whether the voxel at (x, y, z) is solid in the world. Considers
+  // heights[ti], pierced columns, and the hole bitmap. Wraps x for the
+  // planet's longitude topology so chunk-edge faces work across the seam.
+  function isSolid(x, y, z) {
+    if (z < 0 || z >= D) return false;
+    const wx = ((x % W) + W) % W;
+    const ti = z * W + wx;
+    const h = heights[ti];
+    if (h <= -DEPTH) return false;          // fully drilled
+    if (pierced[ti]) return false;
+    if (y > h - 1) return false;            // above column top
+    if (y < -DEPTH) return false;
+    return !isHole(ti, y);
   }
   // Surface color dispatcher — delegates to the active biome.
   function biomeColor(e, m) {
@@ -1675,27 +1799,63 @@ void main() {
     const tx1 = Math.min(W, tx0 + CHUNK_SIZE);
     const tz1 = Math.min(D, tz0 + CHUNK_SIZE);
     const v = [], idx = [];
+    // Fast path is enabled per-column: a column with NO hole bitmap
+    // has the implicit solid-below-heights[ti] property and we can use
+    // the cheap heightmap-vs-neighbor face emit. Slow path iterates
+    // each voxel and checks isSolid for every face — used only on
+    // columns that have been carved into.
     for (let z = tz0; z < tz1; z++) {
       for (let x = tx0; x < tx1; x++) {
         const ti = z * W + x;
         const h = heights[ti];
         if (h <= -DEPTH) continue;
         const topY = h - 1;
-        if (!pierced[ti]) {
-          pushFaceTo(v, idx, x, topY, z, FACES[2], blockColor(x, topY, z));
-        }
-        const hN = heightAt(x, z - 1);
-        const hS = heightAt(x, z + 1);
-        const hE = heightAt(x + 1, z);
-        const hW = heightAt(x - 1, z);
-        for (let y = topY; y >= -DEPTH; y--) {
-          if (y >= hE) pushFaceTo(v, idx, x, y, z, FACES[0], blockColor(x, y, z));
-          if (y >= hW) pushFaceTo(v, idx, x, y, z, FACES[1], blockColor(x, y, z));
-          if (y >= hS) pushFaceTo(v, idx, x, y, z, FACES[4], blockColor(x, y, z));
-          if (y >= hN) pushFaceTo(v, idx, x, y, z, FACES[5], blockColor(x, y, z));
-        }
-        if (h <= -DEPTH + 1 && !pierced[ti]) {
-          pushFaceTo(v, idx, x, -DEPTH, z, FACES[2], [2.4, 0.95, 0.22]);
+        const pier = pierced[ti];
+        // Slow path if THIS column or any 4-neighbor has holes (for
+        // correct face culling at the boundary). Cheap to test —
+        // holes[ti] is null for untouched columns.
+        const ne = z > 0 ? holes[(z - 1) * W + x] : null;
+        const se = z < D - 1 ? holes[(z + 1) * W + x] : null;
+        const ew = holes[z * W + ((x - 1 + W) % W)];
+        const ww = holes[z * W + ((x + 1) % W)];
+        const slowPath = !!(holes[ti] || ne || se || ew || ww);
+        if (!slowPath) {
+          // ---- FAST PATH (heightmap, no holes) ----
+          if (!pier) {
+            pushFaceTo(v, idx, x, topY, z, FACES[2], blockColor(x, topY, z));
+          }
+          const hN = heightAt(x, z - 1);
+          const hS = heightAt(x, z + 1);
+          const hE = heightAt(x + 1, z);
+          const hW = heightAt(x - 1, z);
+          for (let y = topY; y >= -DEPTH; y--) {
+            if (y >= hE) pushFaceTo(v, idx, x, y, z, FACES[0], blockColor(x, y, z));
+            if (y >= hW) pushFaceTo(v, idx, x, y, z, FACES[1], blockColor(x, y, z));
+            if (y >= hS) pushFaceTo(v, idx, x, y, z, FACES[4], blockColor(x, y, z));
+            if (y >= hN) pushFaceTo(v, idx, x, y, z, FACES[5], blockColor(x, y, z));
+          }
+          if (h <= -DEPTH + 1 && !pier) {
+            pushFaceTo(v, idx, x, -DEPTH, z, FACES[2], [2.4, 0.95, 0.22]);
+          }
+        } else {
+          // ---- SLOW PATH (per-voxel, supports holes / overhangs) ----
+          // Iterate every voxel in the column, emit a face for each
+          // air-neighbour direction. ~30 iters per column on average
+          // (clamped to terrain/crust thickness). Only runs on the
+          // few columns where the player actually carved.
+          for (let y = topY; y >= -DEPTH; y--) {
+            if (!isSolid(x, y, z)) continue;
+            const col = blockColor(x, y, z);
+            if (!isSolid(x + 1, y, z)) pushFaceTo(v, idx, x, y, z, FACES[0], col);
+            if (!isSolid(x - 1, y, z)) pushFaceTo(v, idx, x, y, z, FACES[1], col);
+            if (!isSolid(x, y + 1, z)) pushFaceTo(v, idx, x, y, z, FACES[2], col);
+            if (!isSolid(x, y - 1, z)) pushFaceTo(v, idx, x, y, z, FACES[3], col);
+            if (!isSolid(x, y, z + 1)) pushFaceTo(v, idx, x, y, z, FACES[4], col);
+            if (!isSolid(x, y, z - 1)) pushFaceTo(v, idx, x, y, z, FACES[5], col);
+          }
+          if (h <= -DEPTH + 1 && !pier) {
+            pushFaceTo(v, idx, x, -DEPTH, z, FACES[2], [2.4, 0.95, 0.22]);
+          }
         }
       }
     }
@@ -3833,81 +3993,47 @@ void main() {
   function nukeExplosion(cx, cy, cz) {
     // Blinding white flash — huge range, slow decay (≈1.2s).
     spawnFlash(cx, cy, cz, 130, [8.0, 7.4, 5.8], 1.2);
-    // Big crater (~20 tile radius). Two zones:
-    //   (a) inner annihilation — everything flattened to a uniform low
-    //       floor, no terrain features survive. Reads as "vaporised."
-    //   (b) outer bowl — parabolic carve-down from rim to annihilation.
+    // 3D sphere carve into the hole bitmap — produces a real spherical
+    // void in the terrain, with overhangs preserved where the explosion
+    // didn't reach. Centre of the sphere can sit BELOW the surface for
+    // a partially-buried blast, or above for a surface burst.
     const r = Math.hypot(cx, cy, cz) || 1;
     const lat = Math.asin(Math.max(-1, Math.min(1, cy / r)));
     const lon = Math.atan2(cz, cx);
     const ctxT = Math.floor((((lon / (2 * Math.PI)) % 1) + 1) % 1 * W);
     const ctzT = Math.max(0, Math.min(D - 1,
       Math.floor((lat + Math.PI / 2) / Math.PI * D)));
-    const R = 20;
-    const ANNIHIL_R = Math.floor(R * 0.65);    // ~13 tiles fully levelled
-    const ANNIHIL_FLOOR = -3;                  // sea-level minus a bit
-    // Spherical correction: at latitude L, one longitude tile spans
-    // cos(L) of an equatorial tile's physical arc length. Iterate dx
-    // wider by 1/cos(L) and rescale dx in the distance check so the
-    // crater is round on the planet's surface, not oval-stretched
-    // toward the equator/poles.
-    const lat0 = ((ctzT + 0.5) / D) * Math.PI - Math.PI / 2;
-    const lonScale = Math.max(0.05, Math.cos(lat0));
-    const dxRange = Math.ceil(R / lonScale);
-    for (let dz = -R; dz <= R; dz++) {
-      for (let dx = -dxRange; dx <= dxRange; dx++) {
-        const d = Math.hypot(dx * lonScale, dz);
-        if (d > R) continue;
-        const wtx = ((ctxT + dx) % W + W) % W;
-        const wtz = Math.max(0, Math.min(D - 1, ctzT + dz));
-        const ti = wtz * W + wtx;
-        let newH;
-        if (d <= ANNIHIL_R) {
-          // Inner zone — flatten hard to the annihilation floor regardless
-          // of original terrain height. This is the "clear line of
-          // annihilation" — no stumps, no bumps, just glass.
-          newH = ANNIHIL_FLOOR;
-        } else {
-          // Outer zone — smooth blend FROM the original surface AT the
-          // rim DOWN TO the annihilation floor at the inner edge. Quartic
-          // easing so the curve is gentle at the rim and accelerates
-          // into the pit. With a tiny per-tile noise so the edge isn't
-          // a clean machine-cut circle.
-          const k = (R - d) / (R - ANNIHIL_R);     // 1 at inner edge → 0 at rim
-          const e = k * k;                         // ease-in
-          const rimDip = 1 + (Math.random() < 0.5 ? 1 : 0);
-          const surface = heights[ti] - rimDip;
-          newH = Math.floor(surface - e * (surface - ANNIHIL_FLOOR));
-          // Never raise terrain — only carve.
-          if (newH >= heights[ti]) continue;
-        }
-        newH = Math.max(-DEPTH + 1, newH);
-        const removed = heights[ti] - newH;
-        if (removed <= 0) continue;
-        heights[ti] = newH;
-        markTileDirty(wtx, wtz);
-        destroyTree(ti);
-        destroyGrassAt(ti);
-        if (tileTemp.length === W * D) tileTemp[ti] = 250;
-        if (water[ti] > 0) { water[ti] = 0; waterDirty = true; }
-      }
-    }
+    // Push the carve centre slightly INTO the surface so the sphere
+    // hollows the column properly instead of just clipping the top.
+    const upX = cx / r, upY = cy / r, upZ = cz / r;
+    const burialDepth = 4;          // world units below contact point
+    const carveR = 11;              // world-unit radius
+    carveExplosionSphere(
+      cx - upX * burialDepth,
+      cy - upY * burialDepth,
+      cz - upZ * burialDepth,
+      carveR
+    );
 
-    // Nuke hit water? Big splash + ripple wave. Radius scales with the
-    // crater (R=14) so a nuke makes a much bigger splash than a bomb.
-    splashWater(cx, cy, cz, ctxT, ctzT, R);
+    // Splash adapter: estimate equivalent tile radius for splashWater.
+    const splashTileR = Math.ceil(carveR * (W / (2 * Math.PI * PLANET_R)));
+    splashWater(cx, cy, cz, ctxT, ctzT, splashTileR);
 
     // Nuke also scorches a wider grass kill-zone beyond the crater rim
     // (visual shockwave radius). Just clears tufts; doesn't dig terrain.
-    const KILL_R = R + 8;
-    const killDxRange = Math.ceil(KILL_R / lonScale);
-    for (let dz = -KILL_R; dz <= KILL_R; dz++) {
-      for (let dx = -killDxRange; dx <= killDxRange; dx++) {
-        const ddx = dx * lonScale;
-        if (ddx * ddx + dz * dz > KILL_R * KILL_R) continue;
-        const wtx = ((ctxT + dx) % W + W) % W;
-        const wtz = Math.max(0, Math.min(D - 1, ctzT + dz));
-        destroyGrassAt(wtz * W + wtx);
+    {
+      const KILL_R = splashTileR + 8;
+      const lat0 = ((ctzT + 0.5) / D) * Math.PI - Math.PI / 2;
+      const lonScale = Math.max(0.05, Math.cos(lat0));
+      const killDxRange = Math.ceil(KILL_R / lonScale);
+      for (let dz = -KILL_R; dz <= KILL_R; dz++) {
+        for (let dx = -killDxRange; dx <= killDxRange; dx++) {
+          const ddx = dx * lonScale;
+          if (ddx * ddx + dz * dz > KILL_R * KILL_R) continue;
+          const wtx = ((ctxT + dx) % W + W) % W;
+          const wtz = Math.max(0, Math.min(D - 1, ctzT + dz));
+          destroyGrassAt(wtz * W + wtx);
+        }
       }
     }
 
@@ -4060,76 +4186,60 @@ void main() {
   function triggerExplosion(cx, cy, cz) {
     // Warm orange burst flash — short and punchy (≈0.45s).
     spawnFlash(cx, cy, cz, 28, [3.2, 1.8, 0.7], 0.45);
-    // Find the tile under the impact and carve a noise-shaped crater.
+    // 3D sphere carve — produces a real round void in the terrain
+    // with overhangs preserved on cliff impacts.
     const r = Math.hypot(cx, cy, cz) || 1;
     const lat = Math.asin(Math.max(-1, Math.min(1, cy / r)));
     const lon = Math.atan2(cz, cx);
     const ctxT = Math.floor((((lon / (2 * Math.PI)) % 1) + 1) % 1 * W);
     const ctzT = Math.max(0, Math.min(D - 1,
       Math.floor((lat + Math.PI / 2) / Math.PI * D)));
-    const R = 5;
-    // Spherical correction so the crater is round on the surface (not
-    // oval at high latitudes where dx tiles span less physical arc).
-    const bLat0 = ((ctzT + 0.5) / D) * Math.PI - Math.PI / 2;
-    const bLonScale = Math.max(0.05, Math.cos(bLat0));
-    const bDxRange = Math.ceil(R / bLonScale);
-    for (let dz = -R; dz <= R; dz++) {
-      for (let dx = -bDxRange; dx <= bDxRange; dx++) {
-        const d = Math.hypot(dx * bLonScale, dz);
-        if (d > R) continue;
-        const wtx = ((ctxT + dx) % W + W) % W;
-        const wtz = Math.max(0, Math.min(D - 1, ctzT + dz));
-        const ti = wtz * W + wtx;
-        // Crater profile: parabolic bowl × noise so the rim isn't a clean disc.
-        const k = 1 - d / R;
-        const bowl = k * k * 5 * (0.55 + Math.random() * 0.85);
-        const depth = Math.max(1, Math.floor(bowl));
-        const newH = Math.max(-DEPTH + 1, heights[ti] - depth);
-        const removed = heights[ti] - newH;
-        if (removed <= 0) continue;
-        heights[ti] = newH;
-        markTileDirty(wtx, wtz);
-        destroyTree(ti);
-        destroyGrassAt(ti);
-        // Crater = thermal scar on the temperature map.
-        if (tileTemp.length === W * D) tileTemp[ti] = 200;
-        // Water flash-vaporizes wherever the crater eats its column.
-        if (water[ti] > 0) {
-          water[ti] = Math.max(0, water[ti] - depth);
-          waterDirty = true;
-        }
-        // Throw a couple of debris voxels per crater tile (capped to keep
-        // particle count sane).
-        if (Math.random() < 0.45) {
-          const lat2 = ((wtz + 0.5) / D) * Math.PI - Math.PI / 2;
-          const lon2 = ((wtx + 0.5) / W) * 2 * Math.PI;
-          const cl2 = Math.cos(lat2), sl2 = Math.sin(lat2);
-          const co2 = Math.cos(lon2), so2 = Math.sin(lon2);
-          const r2 = PLANET_R + heights[ti] * HEIGHT_SCALE + HEIGHT_SCALE * 0.5;
-          const px = cl2 * co2 * r2, py = sl2 * r2, pz = cl2 * so2 * r2;
-          const ux = cl2 * co2, uy = sl2, uz = cl2 * so2;
-          const speed = 6 + Math.random() * 7;
-          // Outward + radial up bias.
-          const jx = (Math.random() - 0.5) * 2;
-          const jy = (Math.random() - 0.5) * 2;
-          const jz = (Math.random() - 0.5) * 2;
-          particles.push({
-            x: px, y: py, z: pz,
-            vx: ux * speed * 0.7 + jx * speed * 0.4,
-            vy: uy * speed * 0.7 + jy * speed * 0.4,
-            vz: uz * speed * 0.7 + jz * speed * 0.4,
-            color: blockColor(wtx, newH, wtz), t: 0, life: 5.0,
-            attracted: false,
-          });
-        }
-      }
+    const upX = cx / r, upY = cy / r, upZ = cz / r;
+    const carveR = 2.4;                  // world-unit radius
+    const burialDepth = 1.0;             // sink centre slightly below surface
+    const affected = carveExplosionSphere(
+      cx - upX * burialDepth,
+      cy - upY * burialDepth,
+      cz - upZ * burialDepth,
+      carveR
+    );
+    // Throw a few debris voxels per affected tile (sampled, capped).
+    for (let i = 0; i < affected.length; i += 2) {
+      if (Math.random() > 0.5) continue;
+      const ti = affected[i];
+      const wtz = (ti / W) | 0;
+      const wtx = ti - wtz * W;
+      const lat2 = ((wtz + 0.5) / D) * Math.PI - Math.PI / 2;
+      const lon2 = ((wtx + 0.5) / W) * 2 * Math.PI;
+      const cl2 = Math.cos(lat2), sl2 = Math.sin(lat2);
+      const co2 = Math.cos(lon2), so2 = Math.sin(lon2);
+      const r2 = PLANET_R + heights[ti] * HEIGHT_SCALE + HEIGHT_SCALE * 0.5;
+      const px = cl2 * co2 * r2, py = sl2 * r2, pz = cl2 * so2 * r2;
+      const ux = cl2 * co2, uy = sl2, uz = cl2 * so2;
+      const speed = 6 + Math.random() * 7;
+      const jx = (Math.random() - 0.5) * 2;
+      const jy = (Math.random() - 0.5) * 2;
+      const jz = (Math.random() - 0.5) * 2;
+      particles.push({
+        x: px, y: py, z: pz,
+        vx: ux * speed * 0.7 + jx * speed * 0.4,
+        vy: uy * speed * 0.7 + jy * speed * 0.4,
+        vz: uz * speed * 0.7 + jz * speed * 0.4,
+        color: blockColor(wtx, heights[ti], wtz),
+        t: 0, life: 5.0,
+        attracted: false,
+      });
     }
-    // Bomb hit water? Splash + ripples (radius matches the crater R=5).
-    splashWater(cx, cy, cz, ctxT, ctzT, R);
+    // Bomb splash radius scales with the carve radius.
+    const splashTileR = Math.max(2,
+      Math.ceil(carveR * (W / (2 * Math.PI * PLANET_R))));
+    splashWater(cx, cy, cz, ctxT, ctzT, splashTileR);
 
     // Bombs scorch grass beyond the crater edge — a small singe ring.
     {
-      const KILL_R = R + 3;
+      const KILL_R = splashTileR + 3;
+      const bLat0 = ((ctzT + 0.5) / D) * Math.PI - Math.PI / 2;
+      const bLonScale = Math.max(0.05, Math.cos(bLat0));
       const bKillDx = Math.ceil(KILL_R / bLonScale);
       for (let dz = -KILL_R; dz <= KILL_R; dz++) {
         for (let dx = -bKillDx; dx <= bKillDx; dx++) {
