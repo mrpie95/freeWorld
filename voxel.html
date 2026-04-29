@@ -521,7 +521,7 @@
   <div class="row" style="grid-template-columns: 32px 1fr 56px; margin-top:6px">
     <span class="label" style="font-size:10px; opacity:0.7">Auto</span>
     <label style="display:flex; align-items:center; gap:6px; font-size:10px; opacity:0.85; cursor:pointer">
-      <input id="auto-tilt" type="checkbox" />
+      <input id="auto-tilt" type="checkbox" checked />
       Tilt by altitude
     </label>
     <span class="val"></span>
@@ -547,7 +547,7 @@
   <div class="row" style="grid-template-columns: 32px 1fr 56px; margin-top:6px">
     <span class="label" style="font-size:10px; opacity:0.7">Auto</span>
     <label style="display:flex; align-items:center; gap:6px; font-size:10px; opacity:0.85; cursor:pointer">
-      <input id="auto-zoom" type="checkbox" />
+      <input id="auto-zoom" type="checkbox" checked />
       Zoom by altitude
     </label>
     <span class="val"></span>
@@ -2030,6 +2030,114 @@ void main() {
   // AI is a simple wander/munch state machine with random durations.
   const sheep = [];
   let sheepVbo = null, sheepIbo = null, sheepIdxCount = 0;
+  // Ghost sheep — spawned when a sheep dies. Floats up, slowly spins,
+  // shrinks to nothing, emits sparkle trail particles. Pure visual.
+  const ghostSheep = [];
+
+  // Clouds — drifting voxel-block clusters in the upper atmosphere,
+  // styled like ghost sheep (soft cyan-white emissive). Each cloud is a
+  // cluster of cubes at hash-deterministic offsets; drifts slowly via
+  // a per-cloud lon-velocity. Re-meshed every frame.
+  let clouds = [];
+  let cloudVbo = null, cloudIbo = null, cloudIdxCount = 0;
+  function spawnClouds() {
+    clouds = [];
+    // Count scales with world size; biome can scale further in the
+    // future if we want overcast volcanic / clear deserts.
+    const target = Math.min(80, Math.max(20, Math.floor((W * D) / 3000)));
+    for (let i = 0; i < target; i++) {
+      const lat = (Math.random() - 0.5) * Math.PI * 0.96;
+      const lon = Math.random() * Math.PI * 2;
+      // Altitude in voxel units above the terrain ceiling — saucer can
+      // fly through them at cruising heights.
+      const alt = 8 + Math.random() * 8;
+      // Drift speed: tiny lon-velocity (full revolution in ~5–15 min).
+      const lonVel = (Math.random() < 0.5 ? 1 : -1) *
+                     (0.0008 + Math.random() * 0.0014);
+      // Each cloud has a list of block offsets (in tangent + radial
+      // local space). Hash-deterministic so the same cloud keeps its
+      // shape between frames.
+      const blocks = [];
+      const blockCount = 5 + ((Math.random() * 7) | 0);
+      for (let b = 0; b < blockCount; b++) {
+        // Spread blocks tangentially; tighter vertically.
+        blocks.push({
+          ox: (Math.random() - 0.5) * 6.0,
+          oy: (Math.random() - 0.5) * 1.6,
+          oz: (Math.random() - 0.5) * 6.0,
+          // Half-extent of the cube. Bigger blocks near centre.
+          s:  0.9 + Math.random() * 1.3,
+          // Slight per-block tint variance for texture.
+          tint: 0.92 + Math.random() * 0.15,
+        });
+      }
+      clouds.push({ lat, lon, alt, lonVel, blocks });
+    }
+  }
+  function updateClouds(dt) {
+    for (const c of clouds) {
+      c.lon += c.lonVel * dt * 60;       // rad/sec scaled
+      if (c.lon > Math.PI)  c.lon -= Math.PI * 2;
+      if (c.lon < -Math.PI) c.lon += Math.PI * 2;
+    }
+  }
+  function buildCloudMesh() {
+    const v = [], idx = [];
+    if (clouds.length === 0) {
+      cloudIdxCount = 0;
+      return;
+    }
+    // Six unit-cube faces, used per block.
+    const faces = [
+      { n: [ 1, 0, 0], v: [[ 1, 1,-1],[ 1, 1, 1],[ 1,-1, 1],[ 1,-1,-1]] },
+      { n: [-1, 0, 0], v: [[-1, 1, 1],[-1, 1,-1],[-1,-1,-1],[-1,-1, 1]] },
+      { n: [ 0, 1, 0], v: [[-1, 1, 1],[ 1, 1, 1],[ 1, 1,-1],[-1, 1,-1]] },
+      { n: [ 0,-1, 0], v: [[-1,-1,-1],[ 1,-1,-1],[ 1,-1, 1],[-1,-1, 1]] },
+      { n: [ 0, 0, 1], v: [[ 1, 1, 1],[-1, 1, 1],[-1,-1, 1],[ 1,-1, 1]] },
+      { n: [ 0, 0,-1], v: [[-1, 1,-1],[ 1, 1,-1],[ 1,-1,-1],[-1,-1,-1]] },
+    ];
+    for (const c of clouds) {
+      // Local frame at this cloud's lat/lon.
+      const cl = Math.cos(c.lat), sl = Math.sin(c.lat);
+      const co = Math.cos(c.lon), so = Math.sin(c.lon);
+      const ux = cl * co, uy = sl, uz = cl * so;            // up (radial)
+      const ex = -so,     ey = 0,  ez = co;                 // east
+      const nx = -sl * co, ny = cl, nz = -sl * so;          // north
+      // Cloud center radius — sits above terrain ceiling.
+      const baseR = PLANET_R + (H_MAX + c.alt) * HEIGHT_SCALE;
+      const cx = ux * baseR, cy = uy * baseR, cz = uz * baseR;
+      for (const b of c.blocks) {
+        const bx = cx + ex * b.ox + ux * b.oy + nx * b.oz;
+        const by = cy + ey * b.ox + uy * b.oy + ny * b.oz;
+        const bz = cz + ez * b.ox + uz * b.oy + nz * b.oz;
+        // Soft cyan-white tint per block (just below bloom threshold so
+        // they glow without nuking the scene).
+        const t = b.tint;
+        const cR = 0.92 * t, cG = 0.96 * t, cB = 1.05 * t;
+        for (const f of faces) {
+          const off = v.length / 9;
+          for (const corner of f.v) {
+            v.push(
+              bx + corner[0] * b.s,
+              by + corner[1] * b.s,
+              bz + corner[2] * b.s,
+              f.n[0], f.n[1], f.n[2],
+              cR, cG, cB
+            );
+          }
+          idx.push(off, off+1, off+2, off, off+2, off+3);
+        }
+      }
+    }
+    if (!cloudVbo) cloudVbo = gl.createBuffer();
+    if (!cloudIbo) cloudIbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, cloudVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(v), gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cloudIbo);
+    const arr = indexExt ? new Uint32Array(idx) : new Uint16Array(idx);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
+    cloudIdxCount = arr.length;
+  }
   let sheepDirty = true;        // first frame we always build
 
   // Percentage of grass tiles that should get a sheep — driven by the
@@ -2040,25 +2148,34 @@ void main() {
     sheep.length = 0;
     const cap = 500;                                     // hard memory cap
     const threshold = Math.max(0, Math.min(100, sheepRatePct));
-    for (let z = 0; z < D; z++) {
-      for (let x = 0; x < W; x++) {
-        if (sheep.length >= cap) break;
-        const i = z * W + x;
-        const e = elev[i];
-        if (e < 0.46 || e >= 0.70) continue;       // grass band only
-        const h = ((x * 73428319) ^ (z * 19349663)) >>> 0;
-        if ((h % 100) >= threshold) continue;
-        sheep.push({
-          tx: x + 0.5,
-          tz: z + 0.5,
-          heading: Math.random() * Math.PI * 2,
-          state: 'wander',
-          t: 0,
-          stateDur: 2.5 + Math.random() * 3,
-          munchY: 0,
-        });
-      }
-      if (sheep.length >= cap) break;
+    if (threshold <= 0) { sheepDirty = true; return; }
+    // Random rejection sampling instead of a deterministic z=0,x=0
+    // scan. The old scan filled the cap with tiles near the south pole
+    // on big worlds (the cap hit before the loop reached the equator),
+    // so sheep didn't show up where the player was. Random sampling
+    // distributes them evenly across the whole grass band regardless
+    // of world size.
+    const maxTries = cap * 12;
+    let tries = 0;
+    while (sheep.length < cap && tries < maxTries) {
+      tries++;
+      const x = (Math.random() * W) | 0;
+      const z = (Math.random() * D) | 0;
+      const i = z * W + x;
+      const e = elev[i];
+      if (e < 0.46 || e >= 0.70) continue;       // grass band only
+      if (water[i] > 0) continue;                 // skip flooded tiles
+      // Threshold gate keeps the per-tile probability honest.
+      if (Math.random() * 100 >= threshold) continue;
+      sheep.push({
+        tx: x + 0.5,
+        tz: z + 0.5,
+        heading: Math.random() * Math.PI * 2,
+        state: 'wander',
+        t: 0,
+        stateDur: 2.5 + Math.random() * 3,
+        munchY: 0,
+      });
     }
     sheepDirty = true;
   }
@@ -2075,11 +2192,38 @@ void main() {
     const cl = Math.cos(lat), sl = Math.sin(lat);
     const co = Math.cos(lon), so = Math.sin(lon);
     const ux = cl * co, uy = sl, uz = cl * so;
-    const r = PLANET_R + (gy + 0.6) * HEIGHT_SCALE;
+    // s.lift (optional) lifts the sheep above the surface — used by the
+    // abduct tractor to float them up toward the saucer.
+    const r = PLANET_R + (gy + 0.6 + (s.lift || 0)) * HEIGHT_SCALE;
     return [ux * r, uy * r, uz * r];
   }
 
   // Ignite any non-burning sheep within `radius` of the world point.
+  // Instant-kill version: anything inside the radius drops to 'dead'
+  // immediately and spawns a ghost. Used by explosion blast cores and
+  // direct laser hits — i.e. the "you got vaporised" zones, not the
+  // softer fire-spread radius (which still uses igniteSheepArea).
+  function killSheepArea(cx, cy, cz, radius) {
+    const r2 = radius * radius;
+    for (let i = sheep.length - 1; i >= 0; i--) {
+      const s = sheep[i];
+      if (s.state === 'dead' || s.state === 'lifted') continue;
+      const [px, py, pz] = sheepWorldPos(s);
+      const dx = px - cx, dy = py - cy, dz = pz - cz;
+      if (dx*dx + dy*dy + dz*dz > r2) continue;
+      // Ghost effect at the sheep's last position so the death reads
+      // even when it happens off-screen-fast.
+      ghostSheep.push({
+        tx: s.tx, tz: s.tz, heading: s.heading,
+        t: 0, life: 2.6,
+      });
+      // Strictly removing the sheep skips the charred-corpse mesh; a
+      // direct nuke hit shouldn't leave anything behind.
+      sheep.splice(i, 1);
+    }
+    sheepDirty = true;
+  }
+
   function igniteSheepArea(cx, cy, cz, radius) {
     const r2 = radius * radius;
     for (const s of sheep) {
@@ -2113,10 +2257,23 @@ void main() {
       }
       s.t += dt;
       if (s.state === 'dead') continue;          // frozen corpse
+      // Lifted sheep are managed entirely by the abduct tick — skip
+      // wandering / panicking AI so they don't fight the tractor.
+      if (s.state === 'lifted') continue;
       if (s.state === 'panic') {
         if (s.t >= s.stateDur) {
           s.state = 'dead';
           s.munchY = 0;
+          // Spawn a ghost sheep at the dying location — rises, spins,
+          // and fades over a couple seconds. Captures the body's lat/lon
+          // so it stays in place even as the saucer flies on.
+          ghostSheep.push({
+            tx: s.tx,
+            tz: s.tz,
+            heading: s.heading,
+            t: 0,
+            life: 2.6,
+          });
           continue;
         }
         // Erratic high-speed run, sharp random turns.
@@ -2184,6 +2341,39 @@ void main() {
       }
     }
     if (sheep.length) sheepDirty = true;
+    // ---- Ghost-sheep tick: rise, spin, sparkle, and fade ----
+    if (ghostSheep.length) {
+      for (let i = ghostSheep.length - 1; i >= 0; i--) {
+        const g = ghostSheep[i];
+        g.t += dt;
+        if (g.t >= g.life) { ghostSheep.splice(i, 1); continue; }
+        // Sparkle particle every other tick at the ghost's world pos
+        // (head height-ish so they trail off the top).
+        if (Math.random() < 0.55 && particles.length < PARTICLE_CAP) {
+          const tx = Math.max(0, Math.min(W - 1, Math.floor(g.tx)));
+          const tz = Math.max(0, Math.min(D - 1, Math.floor(g.tz)));
+          const ti = tz * W + tx;
+          const lat = (g.tz / D) * Math.PI - Math.PI / 2;
+          const lon = (g.tx / W) * 2 * Math.PI;
+          const cl = Math.cos(lat), sl = Math.sin(lat);
+          const co = Math.cos(lon), so = Math.sin(lon);
+          const lift = g.t * 1.5;             // matches mesh lift
+          const r = PLANET_R + (heights[ti] + 0.6 + lift) * HEIGHT_SCALE;
+          particles.push({
+            x: cl * co * r + (Math.random() - 0.5) * 0.4,
+            y: sl * r + Math.random() * 0.3,
+            z: cl * so * r + (Math.random() - 0.5) * 0.4,
+            vx: 0, vy: 0, vz: 0,
+            color: [1.6, 1.9, 2.6],
+            t: 0, life: 0.9 + Math.random() * 0.4,
+            attracted: false, isDust: true,
+            scale: 0.10 + Math.random() * 0.08,
+            lowGrav: true,
+          });
+        }
+      }
+      sheepDirty = true;       // mesh rebuild reflects ghost positions
+    }
   }
 
   // Box centered at (cx, cy, cz) with half-extents (hx, hy, hz), rotated
@@ -2377,6 +2567,54 @@ void main() {
       leg(-0.23, -0.27, Math.PI);    // back-left
       leg( 0.23, -0.27, 0);          // back-right
     }
+
+    // ---- Ghost sheep — rises, slowly spins, shrinks to nothing. ----
+    // Bright cyan-white emissive (above bloom threshold) so it glows
+    // like a soul drifting up. Geometry is the same boxes as a live
+    // sheep but with an extra horizontal scale that decays toward 0
+    // for the fade-out, and an extra heading-rotation that ticks with
+    // ghost.t for the slow spin.
+    for (const g of ghostSheep) {
+      const tx = Math.max(0, Math.min(W - 1, Math.floor(g.tx)));
+      const tz = Math.max(0, Math.min(D - 1, Math.floor(g.tz)));
+      const ti = tz * W + tx;
+      const gy = heights[ti];
+      if (gy <= -DEPTH) continue;
+      const tNorm = g.t / g.life;            // 0..1
+      // Smooth fade-out via cubic shrink; stays full size for ~50% of
+      // life then collapses fast.
+      const grow  = 1 - tNorm * tNorm * tNorm;
+      // Rise speed in voxels/sec → divided by HEIGHT_SCALE for grid units.
+      const lift  = (g.t * 1.5) / HEIGHT_SCALE * HEIGHT_SCALE; // voxel-units already
+      const liftG = (g.t * 1.5) * VS;        // voxel-units → grid units
+      const heading = g.heading + g.t * 1.3; // slow spin
+      const ch = Math.cos(heading), sh = Math.sin(heading);
+      const x = g.tx, z = g.tz;
+      // Emissive ghost colors. Body slightly cooler than head so the
+      // outline reads.
+      const ghostBody = [1.4 * grow, 1.7 * grow, 2.4 * grow];
+      const ghostHead = [1.6 * grow, 1.9 * grow, 2.6 * grow];
+      // Body — fat oval blob (rises with liftG).
+      pushBoxRotated(v, idx,
+        x, gy + bodyCenY + liftG, z,
+        0.34 * grow, bodyHalfY * grow, 0.40 * grow,
+        ch, sh, ghostBody);
+      // Head — small bobbing block ahead.
+      const headFwd = 0.42 * grow;
+      const hX = x + headFwd * sh;
+      const hZ = z + headFwd * ch;
+      const headBob = Math.sin(g.t * 4) * 0.05 * VS;
+      pushBoxRotated(v, idx,
+        hX, gy + headCenY + liftG + headBob, hZ,
+        0.16 * grow, headHalfY * grow, 0.13 * grow,
+        ch, sh, ghostHead);
+      // Trailing wisp — a thin tail of body that drips off the bottom.
+      pushBoxRotated(v, idx,
+        x, gy + (bodyCenY * 0.5) + liftG * 0.6, z,
+        0.10 * grow, 0.20 * VS * grow, 0.10 * grow,
+        ch, sh, ghostBody);
+    }
+
     if (!sheepVbo) sheepVbo = gl.createBuffer();
     if (!sheepIbo) sheepIbo = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, sheepVbo);
@@ -2539,6 +2777,121 @@ void main() {
   // Cellular-automaton water step. Each tile pulls one unit of water from
   // its highest "wetter" neighbor (where heights+water exceeds ours by 2+).
   // Symmetric pull avoids the iteration-order bias of a push-based scheme.
+  // Explosion-style water displacement. Hollow out a circular impact
+  // zone (water → 0) AND push extra water units into a ring just outside
+  // it — that raised rim then oscillates back inward through the existing
+  // cellular-automaton tick, which gives "ripples / waves" for free
+  // without a custom wave simulator. Spawns a burst of blue splash
+  // particles to sell the moment.
+  function splashWater(cx, cy, cz, ctxT, ctzT, radius) {
+    // Pull water from impact zone, sum it, then fling it out as a ring.
+    let drained = 0;
+    let waterTilesHit = 0;
+    const innerR = Math.max(1, Math.floor(radius * 0.6));
+    // Cosine-correct the dx span so the splash is circular on the
+    // sphere (not oval at high latitudes).
+    const sLat = ((ctzT + 0.5) / D) * Math.PI - Math.PI / 2;
+    const sLonScale = Math.max(0.05, Math.cos(sLat));
+    const sDxIn  = Math.ceil(innerR / sLonScale);
+    for (let dz = -innerR; dz <= innerR; dz++) {
+      for (let dx = -sDxIn; dx <= sDxIn; dx++) {
+        const ddx = dx * sLonScale;
+        if (ddx * ddx + dz * dz > innerR * innerR) continue;
+        const wtx = ((ctxT + dx) % W + W) % W;
+        const wtz = Math.max(0, Math.min(D - 1, ctzT + dz));
+        const ti = wtz * W + wtx;
+        if (water[ti] > 0) {
+          drained += water[ti];
+          water[ti] = 0;
+          waterTilesHit++;
+        }
+      }
+    }
+    if (waterTilesHit === 0) return false;          // no water hit, no splash
+    waterDirty = true;
+
+    // Bulge ring — push the drained water (plus extra) into a ring just
+    // outside the impact crater. Ring tiles get bonus water; the CA will
+    // equalise it back inward over the next few ticks → ripple.
+    const ringR2Min = (innerR + 0.5) * (innerR + 0.5);
+    const ringR2Max = (radius + 1) * (radius + 1);
+    const ringTiles = [];
+    const sDxOut = Math.ceil((radius + 1) / sLonScale);
+    for (let dz = -radius - 1; dz <= radius + 1; dz++) {
+      for (let dx = -sDxOut; dx <= sDxOut; dx++) {
+        const ddx = dx * sLonScale;
+        const r2 = ddx * ddx + dz * dz;
+        if (r2 < ringR2Min || r2 > ringR2Max) continue;
+        const wtx = ((ctxT + dx) % W + W) % W;
+        const wtz = Math.max(0, Math.min(D - 1, ctzT + dz));
+        const ti = wtz * W + wtx;
+        if (water[ti] === 0) continue;              // only bulge actual sea
+        ringTiles.push(ti);
+      }
+    }
+    if (ringTiles.length > 0) {
+      // Push the drained water OUT into the ring as a small bulge. Cap
+      // at +1 per tile so the wave height stays within the CA's
+      // equalize tolerance — bigger bulges leave stuck terraced rings
+      // because flat-neighbour drain only fires at surfaceDrop >= 2.
+      // Volume is conserved, no bonus added.
+      let pool = drained;
+      // Shuffle ring tiles so the ones that get the extra units are
+      // spread around the ring rather than clumped.
+      for (let i = ringTiles.length - 1; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0;
+        const tmp = ringTiles[i]; ringTiles[i] = ringTiles[j]; ringTiles[j] = tmp;
+      }
+      for (const ti of ringTiles) {
+        if (pool <= 0) break;
+        if (water[ti] >= WATER_MAX) continue;
+        water[ti] = Math.min(WATER_MAX, water[ti] + 1);
+        pool--;
+      }
+    }
+
+    // Splash particles: blue/cyan motes flying up + outward, gravity
+    // brings them back down. Quantity scales with how much water got hit.
+    const lat0 = ((ctzT + 0.5) / D) * Math.PI - Math.PI / 2;
+    const lon0 = ((ctxT + 0.5) / W) * 2 * Math.PI;
+    const cl0  = Math.cos(lat0), sl0 = Math.sin(lat0);
+    const co0  = Math.cos(lon0), so0 = Math.sin(lon0);
+    const ux = cl0 * co0, uy = sl0, uz = cl0 * so0;
+    const splashCount = Math.min(120, 30 + waterTilesHit * 4);
+    for (let s = 0; s < splashCount; s++) {
+      if (particles.length >= PARTICLE_CAP) break;
+      const ang = Math.random() * Math.PI * 2;
+      const radJit = Math.random() * radius * 1.3;
+      // Tangent basis around the impact normal so jitter spreads along
+      // the ground plane, not into space.
+      const taX = -so0,         taY = 0,    taZ = co0;
+      const tbX = -sl0 * co0,   tbY = cl0,  tbZ = -sl0 * so0;
+      const ox = (taX * Math.cos(ang) + tbX * Math.sin(ang)) * radJit;
+      const oy = (taY * Math.cos(ang) + tbY * Math.sin(ang)) * radJit;
+      const oz = (taZ * Math.cos(ang) + tbZ * Math.sin(ang)) * radJit;
+      // Velocity: strong up + a bit outward. Outer splashes go higher
+      // and farther for that "ring of arc" look.
+      const upSp  = 6 + Math.random() * 14;
+      const outSp = 2 + Math.random() * 5;
+      // Color: bright deep blue with cyan/white highlights at peaks.
+      const t = Math.random();
+      const cr = 0.20 + t * 0.50;
+      const cg = 0.55 + t * 0.50;
+      const cb = 1.20 + t * 0.40;
+      particles.push({
+        x: cx + ox * 0.4, y: cy + oy * 0.4, z: cz + oz * 0.4,
+        vx: ux * upSp + ox * outSp / Math.max(0.5, radJit),
+        vy: uy * upSp + oy * outSp / Math.max(0.5, radJit),
+        vz: uz * upSp + oz * outSp / Math.max(0.5, radJit),
+        color: [cr, cg, cb],
+        t: 0, life: 1.4 + Math.random() * 1.0,
+        attracted: false, isDust: true,
+        scale: 0.16 + Math.random() * 0.14,
+      });
+    }
+    return true;
+  }
+
   function waterTick() {
     const next = water.slice();
     let moved = false;
@@ -2609,6 +2962,7 @@ void main() {
   buildGrassMesh();
   spawnSheep();
   spawnFireflies();
+  spawnClouds();
 
   document.getElementById('info').textContent =
     `${W}×${D} world, ${heights.length.toLocaleString()} columns, ` +
@@ -2806,6 +3160,7 @@ void main() {
   // `digit` selects the tool, `hotkey` triggers its mode without selection.
   const TOOLS = [
     { name: 'tractor', digit: '1', hotkey: 'b', emoji: '🟢 Tractor', mode: 'hold'    },
+    { name: 'abduct',  digit: '0', hotkey: 'r', emoji: '🐑 Abduct',  mode: 'hold'    },
     { name: 'spew',    digit: '2', hotkey: 'v', emoji: '🟡 Spew',    mode: 'hold'    },
     { name: 'laser',   digit: '3', hotkey: 'x', emoji: '🔴 Laser',   mode: 'hold'    },
     { name: 'pour',    digit: '4', hotkey: 'c', emoji: '💧 Pour',    mode: 'hold'    },
@@ -2893,12 +3248,16 @@ void main() {
     const sz = ufoPosNow[2] - upZNow * 0.6;
     let dx = tx - sx, dy = ty - sy, dz = tz - sz;
     const dl = Math.hypot(dx, dy, dz) || 1;
-    const speed = 30;             // slower than a regular bomb — heavier payload
+    const speed = 110;            // quick blaster-bolt speed
+    // Phew-phew nuke: green Star-Wars bolt. Bright emissive vertex
+    // colour pushes it past the bloom threshold; big scale makes the
+    // bolt read as a fat plasma slug instead of a dot.
     particles.push({
       x: sx, y: sy, z: sz,
       vx: dx / dl * speed, vy: dy / dl * speed, vz: dz / dl * speed,
-      color: [1.4, 1.0, 0.4], t: 0, life: 6.0,
+      color: [0.30, 4.5, 0.50], t: 0, life: 6.0,
       attracted: false, isMissile: true, isNuke: true,
+      scale: 0.55,
     });
   }
 
@@ -2920,12 +3279,14 @@ void main() {
     const sz = ufoPosNow[2] - upZNow * 0.6;
     let dx = tx - sx, dy = ty - sy, dz = tz - sz;
     const dl = Math.hypot(dx, dy, dz) || 1;
-    const speed = 38;
+    const speed = 130;            // quick blaster-bolt speed
+    // Phew-phew bomb: red Star-Wars bolt.
     particles.push({
       x: sx, y: sy, z: sz,
       vx: dx / dl * speed, vy: dy / dl * speed, vz: dz / dl * speed,
-      color: [0.85, 0.20, 0.15], t: 0, life: 4.0,
+      color: [4.5, 0.25, 0.10], t: 0, life: 4.0,
       attracted: false, isMissile: true,
+      scale: 0.45,
     });
   }
   // The saucer position used by fireBomb is the most recent frame's value,
@@ -3287,7 +3648,12 @@ void main() {
       ty = upYNow * (PLANET_R + 1);
       tz = upZNow * (PLANET_R + 1);
     }
-    const sx = ufoPosNow[0], sy = ufoPosNow[1], sz = ufoPosNow[2];
+    // Origin offset below the saucer hull so the beam emerges from the
+    // underside instead of the model's center.
+    const lugiaOff = 0.55;
+    const sx = ufoPosNow[0] - upXNow * lugiaOff;
+    const sy = ufoPosNow[1] - upYNow * lugiaOff;
+    const sz = ufoPosNow[2] - upZNow * lugiaOff;
     let dx = tx - sx, dy = ty - sy, dz = tz - sz;
     const dl = Math.hypot(dx, dy, dz) || 1;
     dx /= dl; dy /= dl; dz /= dl;
@@ -3448,8 +3814,12 @@ void main() {
     spawnFire (sx + dx * tFar,  sy + dy * tFar,  sz + dz * tFar,  70);
     spawnSmoke(sx + dx * tNear, sy + dy * tNear, sz + dz * tNear, 25);
     spawnSmoke(sx + dx * tFar,  sy + dy * tFar,  sz + dz * tFar,  25);
-    igniteSheepArea(sx + dx * tNear, sy + dy * tNear, sz + dz * tNear, 8);
-    igniteSheepArea(sx + dx * tFar,  sy + dy * tFar,  sz + dz * tFar,  8);
+    // Lugia entry/exit zones — direct beam contact is instant kill.
+    killSheepArea(sx + dx * tNear, sy + dy * tNear, sz + dz * tNear, 6);
+    killSheepArea(sx + dx * tFar,  sy + dy * tFar,  sz + dz * tFar,  6);
+    // Outer scorch — ignite anything on the fringes.
+    igniteSheepArea(sx + dx * tNear, sy + dy * tNear, sz + dz * tNear, 12);
+    igniteSheepArea(sx + dx * tFar,  sy + dy * tFar,  sz + dz * tFar,  12);
     // EXIT PLUME — the long-lived blast that streams out the back of the
     // planet to the horizon. 250 fire particles with 4–7s lifetimes
     // launching radially outward from the exit point at high speed.
@@ -3461,45 +3831,80 @@ void main() {
   }
 
   function nukeExplosion(cx, cy, cz) {
-    // Blinding white flash — huge range, slow decay (≈0.9s).
-    spawnFlash(cx, cy, cz, 90, [6.0, 5.6, 4.4], 0.9);
-    // Big crater (~14 tile radius), trees obliterated, mushroom cloud.
+    // Blinding white flash — huge range, slow decay (≈1.2s).
+    spawnFlash(cx, cy, cz, 130, [8.0, 7.4, 5.8], 1.2);
+    // Big crater (~20 tile radius). Two zones:
+    //   (a) inner annihilation — everything flattened to a uniform low
+    //       floor, no terrain features survive. Reads as "vaporised."
+    //   (b) outer bowl — parabolic carve-down from rim to annihilation.
     const r = Math.hypot(cx, cy, cz) || 1;
     const lat = Math.asin(Math.max(-1, Math.min(1, cy / r)));
     const lon = Math.atan2(cz, cx);
     const ctxT = Math.floor((((lon / (2 * Math.PI)) % 1) + 1) % 1 * W);
     const ctzT = Math.max(0, Math.min(D - 1,
       Math.floor((lat + Math.PI / 2) / Math.PI * D)));
-    const R = 14;
+    const R = 20;
+    const ANNIHIL_R = Math.floor(R * 0.65);    // ~13 tiles fully levelled
+    const ANNIHIL_FLOOR = -3;                  // sea-level minus a bit
+    // Spherical correction: at latitude L, one longitude tile spans
+    // cos(L) of an equatorial tile's physical arc length. Iterate dx
+    // wider by 1/cos(L) and rescale dx in the distance check so the
+    // crater is round on the planet's surface, not oval-stretched
+    // toward the equator/poles.
+    const lat0 = ((ctzT + 0.5) / D) * Math.PI - Math.PI / 2;
+    const lonScale = Math.max(0.05, Math.cos(lat0));
+    const dxRange = Math.ceil(R / lonScale);
     for (let dz = -R; dz <= R; dz++) {
-      for (let dx = -R; dx <= R; dx++) {
-        const d = Math.hypot(dx, dz);
+      for (let dx = -dxRange; dx <= dxRange; dx++) {
+        const d = Math.hypot(dx * lonScale, dz);
         if (d > R) continue;
         const wtx = ((ctxT + dx) % W + W) % W;
         const wtz = Math.max(0, Math.min(D - 1, ctzT + dz));
         const ti = wtz * W + wtx;
-        const k = 1 - d / R;
-        const bowl = k * k * 18 * (0.55 + Math.random() * 0.7);
-        const depth = Math.max(2, Math.floor(bowl));
-        const newH = Math.max(-DEPTH + 1, heights[ti] - depth);
+        let newH;
+        if (d <= ANNIHIL_R) {
+          // Inner zone — flatten hard to the annihilation floor regardless
+          // of original terrain height. This is the "clear line of
+          // annihilation" — no stumps, no bumps, just glass.
+          newH = ANNIHIL_FLOOR;
+        } else {
+          // Outer zone — smooth blend FROM the original surface AT the
+          // rim DOWN TO the annihilation floor at the inner edge. Quartic
+          // easing so the curve is gentle at the rim and accelerates
+          // into the pit. With a tiny per-tile noise so the edge isn't
+          // a clean machine-cut circle.
+          const k = (R - d) / (R - ANNIHIL_R);     // 1 at inner edge → 0 at rim
+          const e = k * k;                         // ease-in
+          const rimDip = 1 + (Math.random() < 0.5 ? 1 : 0);
+          const surface = heights[ti] - rimDip;
+          newH = Math.floor(surface - e * (surface - ANNIHIL_FLOOR));
+          // Never raise terrain — only carve.
+          if (newH >= heights[ti]) continue;
+        }
+        newH = Math.max(-DEPTH + 1, newH);
         const removed = heights[ti] - newH;
         if (removed <= 0) continue;
         heights[ti] = newH;
         markTileDirty(wtx, wtz);
         destroyTree(ti);
         destroyGrassAt(ti);
-        // Nuke crater glows hot on the heat map.
         if (tileTemp.length === W * D) tileTemp[ti] = 250;
         if (water[ti] > 0) { water[ti] = 0; waterDirty = true; }
       }
     }
 
+    // Nuke hit water? Big splash + ripple wave. Radius scales with the
+    // crater (R=14) so a nuke makes a much bigger splash than a bomb.
+    splashWater(cx, cy, cz, ctxT, ctzT, R);
+
     // Nuke also scorches a wider grass kill-zone beyond the crater rim
     // (visual shockwave radius). Just clears tufts; doesn't dig terrain.
     const KILL_R = R + 8;
+    const killDxRange = Math.ceil(KILL_R / lonScale);
     for (let dz = -KILL_R; dz <= KILL_R; dz++) {
-      for (let dx = -KILL_R; dx <= KILL_R; dx++) {
-        if (dx * dx + dz * dz > KILL_R * KILL_R) continue;
+      for (let dx = -killDxRange; dx <= killDxRange; dx++) {
+        const ddx = dx * lonScale;
+        if (ddx * ddx + dz * dz > KILL_R * KILL_R) continue;
         const wtx = ((ctxT + dx) % W + W) % W;
         const wtz = Math.max(0, Math.min(D - 1, ctzT + dz));
         destroyGrassAt(wtz * W + wtx);
@@ -3519,70 +3924,135 @@ void main() {
     const tby = uz * tax - ux * taz;
     const tbz = ux * tay - uy * tax;
 
-    // (1) Bright flash at impact — tons of fire to feed the bloom.
-    spawnFire(cx, cy, cz, 200);
-    spawnSmoke(cx, cy, cz, 80);
-    igniteSheepArea(cx, cy, cz, 18);
+    killSheepArea(cx, cy, cz, 14);     // instant vaporise inside blast core
+    igniteSheepArea(cx, cy, cz, 28);   // catch outer ones on fire
 
-    // (2) Stem — tall narrow column of dust + fire rising radially.
+    // (1) Expanding fireball shells. Three concentric blasts with
+    // increasing initial radius + outward velocity, fired in delayed
+    // sequence (250ms apart). Each shell has bright fire on the leading
+    // edge and lingers as a glowing ball that bloom catches. Visually
+    // reads as a fireball that swells, not a single static puff.
+    function fireShell(radius, count, sizeScale, lifeMul, brightness) {
+      for (let i = 0; i < count; i++) {
+        if (particles.length >= PARTICLE_CAP) break;
+        // Uniform-ish point on a sphere shell.
+        const u = Math.random() * 2 - 1;
+        const th = Math.random() * Math.PI * 2;
+        const sq = Math.sqrt(1 - u * u);
+        const sx = Math.cos(th) * sq;
+        const sy = u;
+        const sz = Math.sin(th) * sq;
+        // Convert sphere offset to world tangent frame so up = radial.
+        const wx = tax * sx + ux * sy + tbx * sz;
+        const wy = tay * sx + uy * sy + tby * sz;
+        const wz = taz * sx + uz * sy + tbz * sz;
+        // Outward velocity proportional to radius — the shell expands.
+        const outSp = radius * 1.8 + Math.random() * 4;
+        const heat = 0.7 + Math.random() * 0.4;
+        particles.push({
+          x: cx + wx * radius,
+          y: cy + wy * radius,
+          z: cz + wz * radius,
+          vx: wx * outSp + ux * 4,
+          vy: wy * outSp + uy * 4,
+          vz: wz * outSp + uz * 4,
+          color: [brightness * 3.5 * heat, brightness * 1.6 * heat, brightness * 0.4 * heat],
+          t: 0, life: (1.4 + Math.random() * 0.8) * lifeMul,
+          attracted: false, isDust: true, isFire: true,
+          scale: sizeScale * (0.8 + Math.random() * 0.4),
+        });
+      }
+    }
+    // Initial impact ball (small, white-hot).
+    fireShell(2,  120, 0.55, 1.0, 1.4);
+    spawnFlash(cx, cy, cz, 60, [6.0, 4.5, 2.0], 0.35);
+    // Second shell — bigger, slower, deep orange.
+    setTimeout(() => {
+      if (!heights || !heights.length) return;
+      fireShell(5, 120, 0.85, 1.1, 1.2);
+      spawnFlash(cx, cy, cz, 80, [5.0, 2.8, 1.0], 0.45);
+    }, 220);
+    // Third shell — biggest, slowest, deep red — the swelling fireball.
+    setTimeout(() => {
+      if (!heights || !heights.length) return;
+      fireShell(9, 100, 1.10, 1.2, 1.0);
+      spawnFlash(cx, cy, cz, 100, [4.0, 1.6, 0.4], 0.55);
+    }, 480);
+
+    // (2) Blocky mushroom stem — chunky cubes (large scale) rising as a
+    // narrow column. Big particles → reads as voxel-style blocky smoke
+    // instead of a fine dust haze.
     for (let i = 0; i < 60; i++) {
+      if (particles.length >= PARTICLE_CAP) break;
       const ang = Math.random() * Math.PI * 2;
-      const radJitter = Math.random() * 1.2;        // narrow column
+      const radJitter = Math.random() * 2.0;
       const jx = Math.cos(ang) * radJitter, jz = Math.sin(ang) * radJitter;
       const ox = tax * jx + tbx * jz;
       const oy = tay * jx + tby * jz;
       const oz = taz * jx + tbz * jz;
-      const sp = 14 + Math.random() * 14;            // fast upward
-      const shade = 0.35 + Math.random() * 0.35;
+      const sp = 10 + Math.random() * 10;
+      const shade = 0.18 + Math.random() * 0.20;     // dark thick smoke
       particles.push({
         x: cx + ox, y: cy + oy, z: cz + oz,
-        vx: ux * sp + ox * 0.5,
-        vy: uy * sp + oy * 0.5,
-        vz: uz * sp + oz * 0.5,
-        color: [shade, shade * 0.95, shade * 0.85],
-        t: 0, life: 4.0 + Math.random() * 1.5,
+        vx: ux * sp + ox * 0.4,
+        vy: uy * sp + oy * 0.4,
+        vz: uz * sp + oz * 0.4,
+        color: [shade, shade * 0.95, shade * 0.92],
+        t: 0, life: 6.0 + Math.random() * 2.5,
         attracted: false, isDust: true,
+        // Chunky — well above default 0.45. Looks like voxel smoke blocks.
+        scale: 0.85 + Math.random() * 0.55,
       });
     }
 
-    // (3) Cap — wider, slower particles that puff outward at altitude.
+    // (3) Mushroom cap — fat slow blocks puffing outward at altitude.
+    // Slight color variance (some lighter, some darker) so the cap has
+    // texture instead of being uniform grey.
     for (let i = 0; i < 100; i++) {
+      if (particles.length >= PARTICLE_CAP) break;
       const ang = Math.random() * Math.PI * 2;
-      const radJitter = 4.0 + Math.random() * 4.0;
+      const radJitter = 5.0 + Math.random() * 6.0;
       const jx = Math.cos(ang) * radJitter, jz = Math.sin(ang) * radJitter;
       const ox = tax * jx + tbx * jz;
       const oy = tay * jx + tby * jz;
       const oz = taz * jx + tbz * jz;
-      const upSp = 8 + Math.random() * 8;
-      const outSp = 6 + Math.random() * 6;
-      const shade = 0.40 + Math.random() * 0.35;
+      const upSp = 6 + Math.random() * 6;
+      const outSp = 5 + Math.random() * 5;
+      // Cap brightens at the top — older nuclear-photo look.
+      const shade = 0.30 + Math.random() * 0.35;
+      // A few lighter highlights for texture.
+      const light = Math.random() < 0.18 ? 0.25 : 0;
       particles.push({
         x: cx + ox * 0.2, y: cy + oy * 0.2, z: cz + oz * 0.2,
         vx: ux * upSp + ox / radJitter * outSp,
         vy: uy * upSp + oy / radJitter * outSp,
         vz: uz * upSp + oz / radJitter * outSp,
-        color: [shade, shade * 0.95, shade * 0.85],
-        t: 0, life: 5.0 + Math.random() * 2.0,
+        color: [shade + light, (shade + light) * 0.95, (shade + light) * 0.90],
+        t: 0, life: 7.0 + Math.random() * 3.0,
         attracted: false, isDust: true,
+        scale: 1.0 + Math.random() * 0.85,           // BIG blocks
       });
     }
 
-    // (4) Shockwave ring — fire particles racing outward along the surface.
-    for (let i = 0; i < 80; i++) {
-      const ang = (i / 80) * Math.PI * 2 + Math.random() * 0.08;
+    // (4) Surface shockwave ring — orange fire racing outward across
+    // the now-flattened crater floor.
+    for (let i = 0; i < 60; i++) {
+      if (particles.length >= PARTICLE_CAP) break;
+      const ang = (i / 60) * Math.PI * 2 + Math.random() * 0.08;
       const ox = tax * Math.cos(ang) + tbx * Math.sin(ang);
       const oy = tay * Math.cos(ang) + tby * Math.sin(ang);
       const oz = taz * Math.cos(ang) + tbz * Math.sin(ang);
-      const sp = 16 + Math.random() * 8;
+      const sp = 22 + Math.random() * 12;             // faster than before
       const t = Math.random();
       particles.push({
-        x: cx + ox * 1.5, y: cy + oy * 1.5, z: cz + oz * 1.5,
+        x: cx + ox * 2.0, y: cy + oy * 2.0, z: cz + oz * 2.0,
         vx: ox * sp + ux * 1.5,
         vy: oy * sp + uy * 1.5,
         vz: oz * sp + uz * 1.5,
-        color: [1.8 + t * 1.0, 0.6 + t * 0.7, 0.15 + t * 0.4],
-        t: 0, life: 1.0 + Math.random() * 0.6,
+        color: [2.0 + t * 1.5, 0.7 + t * 0.8, 0.15 + t * 0.4],
+        t: 0, life: 1.4 + Math.random() * 0.8,
         attracted: false, isDust: true,
+        scale: 0.50 + Math.random() * 0.30,
       });
     }
   }
@@ -3598,9 +4068,14 @@ void main() {
     const ctzT = Math.max(0, Math.min(D - 1,
       Math.floor((lat + Math.PI / 2) / Math.PI * D)));
     const R = 5;
+    // Spherical correction so the crater is round on the surface (not
+    // oval at high latitudes where dx tiles span less physical arc).
+    const bLat0 = ((ctzT + 0.5) / D) * Math.PI - Math.PI / 2;
+    const bLonScale = Math.max(0.05, Math.cos(bLat0));
+    const bDxRange = Math.ceil(R / bLonScale);
     for (let dz = -R; dz <= R; dz++) {
-      for (let dx = -R; dx <= R; dx++) {
-        const d = Math.hypot(dx, dz);
+      for (let dx = -bDxRange; dx <= bDxRange; dx++) {
+        const d = Math.hypot(dx * bLonScale, dz);
         if (d > R) continue;
         const wtx = ((ctxT + dx) % W + W) % W;
         const wtz = Math.max(0, Math.min(D - 1, ctzT + dz));
@@ -3649,12 +4124,17 @@ void main() {
         }
       }
     }
+    // Bomb hit water? Splash + ripples (radius matches the crater R=5).
+    splashWater(cx, cy, cz, ctxT, ctzT, R);
+
     // Bombs scorch grass beyond the crater edge — a small singe ring.
     {
       const KILL_R = R + 3;
+      const bKillDx = Math.ceil(KILL_R / bLonScale);
       for (let dz = -KILL_R; dz <= KILL_R; dz++) {
-        for (let dx = -KILL_R; dx <= KILL_R; dx++) {
-          if (dx * dx + dz * dz > KILL_R * KILL_R) continue;
+        for (let dx = -bKillDx; dx <= bKillDx; dx++) {
+          const ddx = dx * bLonScale;
+          if (ddx * ddx + dz * dz > KILL_R * KILL_R) continue;
           const wtx = ((ctxT + dx) % W + W) % W;
           const wtz = Math.max(0, Math.min(D - 1, ctzT + dz));
           destroyGrassAt(wtz * W + wtx);
@@ -3662,11 +4142,14 @@ void main() {
       }
     }
     // Dust cloud — short-lived gray puffs that don't deposit on landing.
-    for (let i = 0; i < 70; i++) {
-      const lat0 = lat, lon0 = lon;
-      const cl0 = Math.cos(lat0), sl0 = Math.sin(lat0);
-      const co0 = Math.cos(lon0), so0 = Math.sin(lon0);
-      const ux = cl0 * co0, uy = sl0, uz = cl0 * so0;
+    // Hoist trig outside the loop (was Math.cos/sin per particle for
+    // values that don't change). Counts trimmed: the eye reads ~30 dust
+    // particles ≈ as well as 70, and bombs are spammable so this halves
+    // per-explosion particle cost.
+    const cl0 = Math.cos(lat), sl0 = Math.sin(lat);
+    const co0 = Math.cos(lon), so0 = Math.sin(lon);
+    const dustUx = cl0 * co0, dustUy = sl0, dustUz = cl0 * so0;
+    for (let i = 0; i < 60; i++) {
       const jx = (Math.random() - 0.5) * 2;
       const jy = (Math.random() - 0.2) * 2;          // bias upward
       const jz = (Math.random() - 0.5) * 2;
@@ -3674,18 +4157,21 @@ void main() {
       const shade = 0.55 + Math.random() * 0.30;
       particles.push({
         x: cx, y: cy, z: cz,
-        vx: ux * 2 + jx * sp,
-        vy: uy * 2 + jy * sp,
-        vz: uz * 2 + jz * sp,
+        vx: dustUx * 2 + jx * sp,
+        vy: dustUy * 2 + jy * sp,
+        vz: dustUz * 2 + jz * sp,
         color: [shade, shade * 0.95, shade * 0.85],
         t: 0, life: 1.2 + Math.random() * 0.8,
         attracted: false, isDust: true,
       });
     }
-    // Fire plume on top of the dust — orange flicker that bloom picks up.
-    spawnFire(cx, cy, cz, 50);
-    spawnSmoke(cx, cy, cz, 18);
-    igniteSheepArea(cx, cy, cz, 6);
+    // Fire plume + smoke — back near the original counts; the global
+    // PARTICLE_CAP enforced in the update loop is what stops spam from
+    // tanking perf, so individual explosions stay visually meaty.
+    spawnFire(cx, cy, cz, 45);
+    spawnSmoke(cx, cy, cz, 16);
+    killSheepArea(cx, cy, cz, 4);      // instant kill inside crater
+    igniteSheepArea(cx, cy, cz, 8);    // ignite outer ring
   }
 
   // Tiny voxel cube for particles. White vertex color; uTint colors per-particle.
@@ -3758,7 +4244,13 @@ void main() {
       const env = Math.sin(phase * Math.PI);
       const intensity = env * env * env * env * 2.6;
       // Cone-ish radius: wider at the bottom, narrower toward the saucer.
-      const baseR = 0.45 + (1.0 - phase) * 0.30;
+      // Steep funnel taper near the top (last 18% of phase) so the rings
+      // visibly converge INTO the emitter orb instead of fading out at
+      // a fat radius. The taper is squared so the convergence accelerates
+      // — rings at phase 1.0 collapse to almost a point.
+      const topTaperT = Math.max(0, (phase - 0.82) / 0.18);
+      const topTaper  = 1 - topTaperT * topTaperT;
+      const baseR = (0.45 + (1.0 - phase) * 0.30) * topTaper;
       for (let i = 0; i < sides; i++) {
         const a = (i / sides) * Math.PI * 2;
         const cx = Math.cos(a), cz = Math.sin(a);
@@ -3773,10 +4265,10 @@ void main() {
         // some volume when viewed from the side.
         const yTop = yC + ringHalfHeight;
         const yBot = yC - ringHalfHeight;
-        // Pure deep neon: zero red, dominant green, faint cyan only on the
-        // outer edge so the rings read as solid green not washy lime.
-        const inG = 3.4 * intensity, inR = 0.0,             inB = 0.20 * intensity;
-        const ouG = 1.8 * intensity, ouR = 0.0,             ouB = 0.55 * intensity;
+        // Brightness only — color is supplied at render time via uTint
+        // so the same mesh can drive tractor (orange) or abduct (green).
+        const inG = 3.4 * intensity, inR = 3.4 * intensity,  inB = 3.4 * intensity;
+        const ouG = 1.8 * intensity, ouR = 1.8 * intensity,  ouB = 1.8 * intensity;
         // Inner top
         beamVertArr[vp++] = cx * rIn;  beamVertArr[vp++] = yTop; beamVertArr[vp++] = cz * rIn;
         beamVertArr[vp++] = 0;         beamVertArr[vp++] = 1;    beamVertArr[vp++] = 0;
@@ -3802,8 +4294,12 @@ void main() {
     for (let s = 0; s <= BEAM_HAZE_SEGS; s++) {
       const v = s / BEAM_HAZE_SEGS;             // 0 at saucer, 1 at target
       const y = -v;
-      // Cone radius — wider at the ground, like the original beam.
-      const rBase = 0.50 + v * 0.55;
+      // Cone radius — wider at the ground, narrower toward the orb. v→0
+      // is the saucer end (pinch in to ~0.05 to vanish into the orb).
+      const phaseTop = 1 - v;                   // 1 at saucer, 0 at target
+      const taperT   = Math.max(0, (phaseTop - 0.82) / 0.18);
+      const topTaper = 1 - taperT * taperT;
+      const rBase    = (0.50 + v * 0.55) * topTaper;
       // Brightness fades out at top + bottom so the haze blends smoothly.
       const fade = Math.sin(v * Math.PI) * 0.55 + 0.10;
       for (let i = 0; i < sides; i++) {
@@ -3814,11 +4310,10 @@ void main() {
         const rr = rBase + wobble;
         beamVertArr[vp++] = cx * rr; beamVertArr[vp++] = y; beamVertArr[vp++] = cz * rr;
         beamVertArr[vp++] = cx;      beamVertArr[vp++] = 0; beamVertArr[vp++] = cz;
-        // Haze: zero red, deep green, slight cyan tail so the cone reads
-        // like emerald gas instead of muddy olive.
-        beamVertArr[vp++] = 0.0;
+        // Neutral white — color comes from uTint at render time.
         beamVertArr[vp++] = 0.85 * fade;
-        beamVertArr[vp++] = 0.30 * fade;
+        beamVertArr[vp++] = 0.85 * fade;
+        beamVertArr[vp++] = 0.85 * fade;
       }
     }
     for (let s = 0; s < BEAM_HAZE_SEGS; s++) {
@@ -3838,21 +4333,25 @@ void main() {
   // Laser bolt — a thin square-cross-section beam, with a brighter inner
   // core and a softer outer glow. Built as two concentric box-prisms going
   // from local y=0 (saucer) to y=-1 (target), additively blended.
-  function buildLaserBeam(thickness, color) {
+  // Laser beam = a thin cylinder along local -Y (y=0 saucer, y=-1 target).
+  // Cylinder geometry instead of a box-prism kills the harsh "wall of
+  // brightness" you got from face-on box angles where 6 additive faces
+  // stacked. Cylinder has consistent silhouette from any viewpoint.
+  function buildLaserBeam(thickness, color, sides = 14) {
     const t = thickness;
     const v = [], idx = [];
-    // 8 corners of a thin box: top square at y=0, bottom square at y=-1.
-    const corners = [
-      [-t, 0, -t], [ t, 0, -t], [ t, 0,  t], [-t, 0,  t],
-      [-t,-1, -t], [ t,-1, -t], [ t,-1,  t], [-t,-1,  t],
-    ];
-    for (const c of corners) v.push(c[0], c[1], c[2], 0, 1, 0, color[0], color[1], color[2]);
-    // Side faces (4) + top + bottom — wound outward.
-    const faces = [
-      [0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7],
-      [3,2,1,0],[4,5,6,7],
-    ];
-    for (const f of faces) idx.push(f[0], f[1], f[2], f[0], f[2], f[3]);
+    for (let i = 0; i < sides; i++) {
+      const a = (i / sides) * Math.PI * 2;
+      const cx = Math.cos(a), cz = Math.sin(a);
+      // Top ring (y=0) and bottom ring (y=-1).
+      v.push(cx * t,  0, cz * t,  cx, 0, cz, color[0], color[1], color[2]);
+      v.push(cx * t, -1, cz * t,  cx, 0, cz, color[0], color[1], color[2]);
+    }
+    for (let i = 0; i < sides; i++) {
+      const a = i * 2;
+      const b = ((i + 1) % sides) * 2;
+      idx.push(a, b, b + 1, a, b + 1, a + 1);
+    }
     return { v, idx };
   }
   function uploadStaticMesh(mesh) {
@@ -3865,8 +4364,20 @@ void main() {
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arr, gl.STATIC_DRAW);
     return { vbo, ibo, count: arr.length };
   }
-  const laserCore = uploadStaticMesh(buildLaserBeam(0.06, [1.0, 0.30, 0.25]));
-  const laserGlow = uploadStaticMesh(buildLaserBeam(0.18, [1.0, 0.15, 0.10]));
+  // Three nested cylinders for that "lightsaber" feel:
+  //   core — narrow, white-hot           (carries the focused beam line)
+  //   glow — medium, warm orange         (forms the body of the beam)
+  //   halo — wide, very dim deep red     (soft bloom along the entire
+  //                                        length so the beam paints
+  //                                        light into the air around it)
+  // Lightsaber: a TINY pinprick white core sheathed in a much thicker
+  // saturated-color glow + soft outer halo. The blade reads as the
+  // *colour* (not white) because the colored glow is 10× the core
+  // radius so its volume dominates whatever you see edge-on. Saber
+  // colour: hot crimson red.
+  const laserCore = uploadStaticMesh(buildLaserBeam(0.018, [1.0, 0.95, 0.90]));
+  const laserGlow = uploadStaticMesh(buildLaserBeam(0.11,  [1.0, 0.05, 0.02]));
+  const laserHalo = uploadStaticMesh(buildLaserBeam(0.30,  [1.0, 0.04, 0.01], 16));
 
   // Lugia beam — wide cylinder along local -Y from y=0 to y=-1, scaled to
   // planet-traversing length at draw time via the model matrix.
@@ -4417,6 +4928,7 @@ void main() {
     buildGrassMesh();
     spawnSheep();
     spawnFireflies();
+    spawnClouds();
     ufo.lat = 0; ufo.lon = 0; ufo.heading = 0;
     ufo.fwdX = 0; ufo.fwdY = 1; ufo.fwdZ = 0;        // north at lat=0, lon=0
     ufo.speed = 0;
@@ -4727,7 +5239,7 @@ void main() {
   // to horizon / first-person feel), high alt = full top-down. State
   // mirrored from the dev panel toggle + sliders so it's tweakable live.
   const autoTilt = {
-    enabled: false,
+    enabled: true,     // default ON — feels right for most play
     low: 3,            // alt at which tilt is at its max value
     high: 40,          // alt at which tilt is 0 (full overhead)
     maxDeg: 70,        // tilt angle in degrees when at low altitude
@@ -4759,7 +5271,7 @@ void main() {
   // high alt = farther (overview). Same shape as auto-tilt: linear interp
   // between [low,high] altitude window mapped to [closeDist,farDist].
   const autoZoom = {
-    enabled: false,
+    enabled: true,     // default ON — pairs with auto-tilt
     low: 3,
     high: 40,
     closeDist: 10,
@@ -5374,7 +5886,12 @@ void main() {
     // surface) get top-down illumination, which a ground-level point
     // light couldn't do (their normals would face away).
     if (isToolActive('light') && beamTarget && ufoPosNow) {
-      const sx = ufoPosNow[0], sy = ufoPosNow[1], sz = ufoPosNow[2];
+      // Spotlight emerges from the saucer underside so the cone doesn't
+      // start inside the hull.
+      const lightOff = 0.55;
+      const sx = ufoPosNow[0] - upXNow * lightOff;
+      const sy = ufoPosNow[1] - upYNow * lightOff;
+      const sz = ufoPosNow[2] - upZNow * lightOff;
       let dx = beamTarget[0] - sx, dy = beamTarget[1] - sy, dz = beamTarget[2] - sz;
       const dl = Math.hypot(dx, dy, dz) || 1;
       searchPosBuf[0] = sx;
@@ -5394,10 +5911,11 @@ void main() {
     gl.uniform4fv(uSearchPos, searchPosBuf);
     gl.uniform4fv(uSearchDir, searchDirBuf);
 
-    // Tractor-beam ground glow — light at the cursor target while held.
-    // Use isToolActive directly: the local `tractorActive` const is declared
-    // later in the frame (TDZ), so we can't reference it here.
-    if (isToolActive('tractor') && beamTarget) {
+    // Tractor-beam ground glow — green pool of light on whatever the
+    // beam is pointed at. Now driven by the gentle ABDUCT tool (the
+    // "classic UFO green tractor"). The destructive tractor is orange
+    // and gets its glow from the warm-emit shader path on debris.
+    if (isToolActive('abduct') && beamTarget) {
       gl.uniform4f(uTractorLight,
         beamTarget[0], beamTarget[1], beamTarget[2], 7.0);
     } else {
@@ -5470,6 +5988,18 @@ void main() {
       gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, STRIDE, 24);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, grassIbo);
       gl.drawElements(gl.TRIANGLES, grassIdxCount, idxType, 0);
+    }
+    // Clouds — drifting voxel-block clusters in the upper atmosphere.
+    // Same vertex format / shader as terrain so the planet's lighting
+    // model applies — that's actually what gives them the soft glow on
+    // the lit side and dim shadow on the dark side.
+    if (cloudIdxCount > 0) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, cloudVbo);
+      gl.vertexAttribPointer(aPos,   3, gl.FLOAT, false, STRIDE, 0);
+      gl.vertexAttribPointer(aNorm,  3, gl.FLOAT, false, STRIDE, 12);
+      gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, STRIDE, 24);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cloudIbo);
+      gl.drawElements(gl.TRIANGLES, cloudIdxCount, idxType, 0);
     }
     // Sheep — same vertex format, same shader. Mesh rebuilt each frame
     // when sheep are moving so positions stay current.
@@ -5664,6 +6194,7 @@ void main() {
 
     // ---- Tractor beam tick: pull voxels off all columns under the beam ----
     const tractorActive = isToolActive('tractor');
+    const abductActive  = isToolActive('abduct');
     const spewActive    = isToolActive('spew');
     const laserActive   = isToolActive('laser');
     const pourActive    = isToolActive('pour');
@@ -5701,26 +6232,41 @@ void main() {
       if (!lugiaActive) {
         const chargeFrac = lugiaT / LUGIA_CHARGE;
         const power = Math.pow(chargeFrac, 2.5);
-        fireLugia(power);
+        // Stash power so each subsequent bang re-uses the same charge.
+        lugiaPower = power;
+        fireLugia(power);                           // bang #0
+        lugiaLastBangIdx = 0;
+        // Muzzle flash for the first bang (the rest fire on the timer
+        // tick below as new bangs are detected).
+        if (lugiaOrigin) {
+          const k0 = 1 / LUGIA_BANG_COUNT;
+          spawnFlash(lugiaOrigin[0], lugiaOrigin[1], lugiaOrigin[2],
+                     55 + k0 * 35,
+                     [4.5 * k0 + 2.0, 5.0 * k0 + 2.4, 7.0 * k0 + 3.0],
+                     0.45);
+        }
         lugiaState = 'firing';
         lugiaT = 0;
       }
     } else if (lugiaState === 'firing') {
       lugiaT += dt;
-      // Detect when a new bang starts — spawn a blinding-bright muzzle
-      // flash at the orb's location so the cannon visibly thumps each
-      // time the beam re-strobes.
+      // New bang? Re-fire from the saucer's CURRENT position so the
+      // beam tracks the saucer instead of strobing at a stale origin
+      // (the saucer can be far away by bang #4). This also re-carves
+      // the planet at the new location, so flying while firing leaves
+      // a trail of craters — properly devastating.
       const bangIdx = Math.min(LUGIA_BANG_COUNT - 1,
                                 Math.floor(lugiaT / LUGIA_BANG_INTERVAL));
-      if (bangIdx > lugiaLastBangIdx && lugiaOrigin) {
+      if (bangIdx > lugiaLastBangIdx) {
         lugiaLastBangIdx = bangIdx;
-        // Flash bigger and brighter on later bangs so it builds toward
-        // the final shot — adds dramatic crescendo.
-        const k = (bangIdx + 1) / LUGIA_BANG_COUNT;
-        spawnFlash(lugiaOrigin[0], lugiaOrigin[1], lugiaOrigin[2],
-                   55 + k * 35,
-                   [4.5 * k + 2.0, 5.0 * k + 2.4, 7.0 * k + 3.0],
-                   0.45);
+        fireLugia(lugiaPower);          // updates lugiaOrigin / lugiaAxis
+        if (lugiaOrigin) {
+          const k = (bangIdx + 1) / LUGIA_BANG_COUNT;
+          spawnFlash(lugiaOrigin[0], lugiaOrigin[1], lugiaOrigin[2],
+                     55 + k * 35,
+                     [4.5 * k + 2.0, 5.0 * k + 2.4, 7.0 * k + 3.0],
+                     0.45);
+        }
       }
       if (lugiaT >= LUGIA_FIRE) {
         lugiaState = 'idle'; lugiaT = 0; lugiaLastBangIdx = -1;
@@ -5825,6 +6371,69 @@ void main() {
       }
     }
 
+    // ---- Abduct tick — gentle green tractor that lifts sheep into the
+    // saucer without ripping terrain. Each tick: any sheep near the
+    // cursor target (or directly under the saucer if no target) gets
+    // s.lift bumped upward + emits a sparkle particle. When a sheep
+    // reaches saucer altitude it pops into the collected stack.
+    if (abductActive) {
+      const ax = beamTarget ? beamTarget[0] : ufoPos[0] - upX * 4;
+      const ay = beamTarget ? beamTarget[1] : ufoPos[1] - upY * 4;
+      const az = beamTarget ? beamTarget[2] : ufoPos[2] - upZ * 4;
+      const beamR2 = 16;                  // 4-unit pickup radius
+      for (let i = sheep.length - 1; i >= 0; i--) {
+        const s = sheep[i];
+        if (s.state === 'dead') continue;
+        const [px, py, pz] = sheepWorldPos(s);
+        const dx = px - ax, dy = py - ay, dz = pz - az;
+        if (dx*dx + dy*dy + dz*dz > beamR2) continue;
+        // Mark lifted (so it stops wandering / panicking) and start
+        // floating up. lift is in voxel units so it scales by HEIGHT_SCALE.
+        if (s.state !== 'lifted') {
+          s.state = 'lifted';
+          s.t = 0; s.stateDur = 999;       // stay lifted indefinitely
+          s.heading = 0;
+          s.lift = 0;
+        }
+        s.lift += dt * 8.0;                // ~8 voxels/sec rise
+        // Sparkle particle every few ticks.
+        if (Math.random() < 0.5) {
+          particles.push({
+            x: px + (Math.random() - 0.5) * 0.3,
+            y: py + (Math.random() - 0.5) * 0.3,
+            z: pz + (Math.random() - 0.5) * 0.3,
+            vx: 0, vy: 0, vz: 0,
+            color: [0.30, 1.40, 0.55], t: 0, life: 0.6,
+            attracted: false, isDust: true,
+            scale: 0.10 + Math.random() * 0.10,
+            lowGrav: true,
+          });
+        }
+        // When the sheep reaches the saucer altitude, collect + remove.
+        const sheepR = Math.hypot(px, py, pz);
+        const ufoR   = Math.hypot(ufoPos[0], ufoPos[1], ufoPos[2]);
+        if (sheepR + 0.4 >= ufoR) {
+          // Tiny puff to mark the abduction.
+          for (let k = 0; k < 6; k++) {
+            particles.push({
+              x: px, y: py, z: pz,
+              vx: (Math.random() - 0.5) * 1.5,
+              vy: (Math.random() - 0.5) * 1.5,
+              vz: (Math.random() - 0.5) * 1.5,
+              color: [0.40, 1.60, 0.60], t: 0, life: 0.5,
+              attracted: false, isDust: true,
+              scale: 0.14,
+            });
+          }
+          sheep.splice(i, 1);
+          sheepDirty = true;
+        }
+      }
+      // Lifted sheep need the mesh rebuilt every tick so their position
+      // tracks their growing s.lift offset.
+      sheepDirty = true;
+    }
+
     // Pump up to N dirty chunks per frame. Far cheaper than rebuilding the
     // whole planet — continuous tools that touch one area only invalidate
     // a handful of chunks.
@@ -5840,6 +6449,8 @@ void main() {
     updateSheep(dt);
     if (sheepDirty) buildSheepMesh();
     if (fireflies.length) buildFirefliesMesh(now);
+    updateClouds(dt);
+    buildCloudMesh();
 
     // ---- Pour tick — drops a unit of water on the target tile ----
     pourTickTimer += dt;
@@ -5865,6 +6476,12 @@ void main() {
     laserTickTimer += dt;
     if (laserActive && laserTickTimer >= 0.07) {
       laserTickTimer = 0;
+      // Vaporise any sheep in the beam's hit area. Tight radius — laser
+      // is a focused weapon, not an AoE — so you have to actually paint
+      // the sheep to kill it.
+      if (beamTarget) {
+        killSheepArea(beamTarget[0], beamTarget[1], beamTarget[2], 1.5);
+      }
       const [ctx, ctz] = targetTile();
       const lr = 1;                                  // tighter than tractor
       for (let dz = -lr; dz <= lr; dz++) {
@@ -5926,8 +6543,12 @@ void main() {
       const sx = (Math.random() - 0.5) * spread;
       const sy = (Math.random() - 0.5) * spread * 0.6;
       const sz = (Math.random() - 0.5) * spread;
+      // Spew particles emit from the saucer underside, not the body.
+      const spewOff = 0.55;
       particles.push({
-        x: ufoPos[0], y: ufoPos[1], z: ufoPos[2],
+        x: ufoPos[0] - upX * spewOff,
+        y: ufoPos[1] - upY * spewOff,
+        z: ufoPos[2] - upZ * spewOff,
         vx: dirX * speed + sx,
         vy: dirY * speed + sy,
         vz: dirZ * speed + sz,
@@ -5966,6 +6587,15 @@ void main() {
     }
     prevTractor = tractorActive;
 
+    // Hard cap so spamming bombs/missiles can't blow the array up to
+    // tens of thousands of entries (the renderer caps at PARTICLE_CAP
+    // anyway, but the update loop iterates everything regardless).
+    // Drop the OLDEST particles past the cap — they've been on screen
+    // longest and are most likely to already be fading. Single splice
+    // is O(n) but only triggers when over cap.
+    if (particles.length > PARTICLE_CAP) {
+      particles.splice(0, particles.length - PARTICLE_CAP);
+    }
     // Update particles.
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
@@ -5990,21 +6620,64 @@ void main() {
         // Missile: guided, straight-line at the cursor. Gravity used to pull
         // it past the limb when aiming near the planet's edge, so it now
         // ignores gravity and just travels to the target. Detonates on first
-        // solid contact.
+        // solid contact. Stash previous position so we can fill in trail
+        // particles between frames — at 130u/s a single per-frame trail
+        // spawn would leave huge gaps.
+        const prevX = p.x, prevY = p.y, prevZ = p.z;
         p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
-        const newR = Math.hypot(p.x, p.y, p.z);
-        const lat = Math.asin(Math.max(-1, Math.min(1, p.y / newR)));
-        const lon = Math.atan2(p.z, p.x);
-        const tx = Math.floor((((lon / (2 * Math.PI)) % 1) + 1) % 1 * W);
-        const tz = Math.max(0, Math.min(D - 1,
-          Math.floor((lat + Math.PI / 2) / Math.PI * D)));
-        const ti = tz * W + tx;
-        const surfaceR = PLANET_R + heights[ti] * HEIGHT_SCALE;
-        if (newR <= surfaceR + 0.05) {
-          if (p.isNuke) nukeExplosion(p.x, p.y, p.z);
-          else          triggerExplosion(p.x, p.y, p.z);
-          particles.splice(i, 1);
+        // Moving point light pinned to the bolt — flashes terrain the
+        // bolt flies past in its colour.
+        const lightC = p.isNuke
+          ? [0.40, 5.5, 0.60]
+          : [5.5, 0.30, 0.10];
+        spawnFlash(p.x, p.y, p.z, 14, lightC, 0.06);
+        // Phew-phew trail — interpolate ~6 trail particles between
+        // last-frame and current position so the tracer reads as a
+        // continuous bright streak even at blaster speeds.
+        const trailC = p.isNuke
+          ? [0.20, 3.0, 0.30]
+          : [3.0, 0.18, 0.08];
+        // Walk the segment from prev → new, spawning trail particles
+        // and testing collision at each step. At 130u/s the bolt could
+        // skip over a thin column in one whole frame without this.
+        const TRAIL_STEPS = 6;
+        let detonated = false;
+        for (let s = 1; s <= TRAIL_STEPS; s++) {
+          const k = s / TRAIL_STEPS;
+          const sx = prevX + (p.x - prevX) * k;
+          const sy = prevY + (p.y - prevY) * k;
+          const sz = prevZ + (p.z - prevZ) * k;
+          // Trail particle at this step (skip the very last step which
+          // is the bolt's own current position; the bolt particle itself
+          // covers it).
+          if (s < TRAIL_STEPS && particles.length < PARTICLE_CAP) {
+            particles.push({
+              x: sx, y: sy, z: sz,
+              vx: 0, vy: 0, vz: 0,
+              color: trailC, t: 0, life: 0.18,
+              attracted: false, isDust: true,
+              scale: 0.28 + Math.random() * 0.08,
+              lowGrav: true,
+            });
+          }
+          // Collision check at this step.
+          const stepR = Math.hypot(sx, sy, sz);
+          const stepLat = Math.asin(Math.max(-1, Math.min(1, sy / stepR)));
+          const stepLon = Math.atan2(sz, sx);
+          const sxT = Math.floor((((stepLon / (2 * Math.PI)) % 1) + 1) % 1 * W);
+          const szT = Math.max(0, Math.min(D - 1,
+            Math.floor((stepLat + Math.PI / 2) / Math.PI * D)));
+          const sti = szT * W + sxT;
+          const surfaceR = PLANET_R + heights[sti] * HEIGHT_SCALE;
+          if (stepR <= surfaceR + 0.05) {
+            if (p.isNuke) nukeExplosion(sx, sy, sz);
+            else          triggerExplosion(sx, sy, sz);
+            particles.splice(i, 1);
+            detonated = true;
+            break;
+          }
         }
+        if (!detonated) continue;
         continue;
       } else if (p.isDust) {
         // Dust drifts and fades — no landing, no deposit. Mild gravity so it
@@ -6202,17 +6875,88 @@ void main() {
       gl.uniform3f(oTint, 1, 1, 1);
     }
 
-    // ---- Beam cone — visible when tractor or laser is firing ----
-    if (tractorActive || laserActive) {
-      // Aim the cone from the saucer to the cursor target. Cone's local
-      // -Y direction points along (target - saucer), so local Y=-1 lands
-      // exactly on the target. Build an orthonormal basis perpendicular to
-      // that axis using the saucer's east as a reference vector.
+    // ---- Tool emitter orb — small ball under the saucer that all
+    // tools shoot from. Always visible (so beams don't look like they
+    // float in space) and tinted by the active tool so the saucer
+    // visibly "loads" the right energy: green for tractor, red for
+    // laser, blue-white for light, etc. Pulses brighter while a hold
+    // tool is active.
+    {
+      const emitOff = 0.55;
+      const ex = ufoPos[0] - upX * emitOff;
+      const ey = ufoPos[1] - upY * emitOff;
+      const ez = ufoPos[2] - upZ * emitOff;
+      // Pick tint by active tool. Idle = dim cyan-white "ready" pilot.
+      let er = 0.45, eg = 0.55, eb = 0.75;
+      let baseScale = 0.16;
+      let intensity = 1.0;
+      const lightActive = isToolActive('light');
+      const moveActive  = isToolActive('move');
+      const pourActive2 = isToolActive('pour');
+      const spewActive2 = isToolActive('spew');
+      if (tractorActive)      { er = 3.40; eg = 1.30; eb = 0.10; intensity = 1.6; }
+      else if (abductActive)  { er = 0.10; eg = 2.40; eb = 0.55; intensity = 1.6; }
+      else if (laserActive)   { er = 4.50; eg = 0.20; eb = 0.05; intensity = 1.7; }
+      else if (lightActive)   { er = 1.40; eg = 1.55; eb = 1.85; intensity = 1.5; }
+      else if (lugiaState === 'charging' || lugiaState === 'firing') {
+        // Lugia draws its own dramatic orb already; keep this base
+        // emitter dim and white-blue so it doesn't fight the show.
+        er = 0.55; eg = 0.85; eb = 1.20; intensity = 0.75;
+      }
+      else if (moveActive)    { er = 0.80; eg = 1.40; eb = 1.80; intensity = 1.2; }
+      else if (pourActive2)   { er = 0.30; eg = 0.60; eb = 1.40; intensity = 1.2; }
+      else if (spewActive2)   { er = 1.20; eg = 0.95; eb = 0.55; intensity = 1.2; }
+
+      // Subtle breathe + fast flicker when a tool is firing so the orb
+      // visibly "powers" the beam instead of sitting still.
+      const breathe = 1.0 + 0.06 * Math.sin(now * 0.005);
+      const fireFlick = (intensity > 1.0)
+        ? (0.85 + Math.random() * 0.30)
+        : 1.0;
+      const s = baseScale * (intensity > 1.0 ? 1.25 : 1.0) * breathe;
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+      gl.depthMask(false);
+      gl.disable(gl.CULL_FACE);
+      const em = new Float32Array([
+        s, 0, 0, 0,
+        0, s, 0, 0,
+        0, 0, s, 0,
+        ex, ey, ez, 1,
+      ]);
+      gl.uniformMatrix4fv(oModel, false, em);
+      gl.bindBuffer(gl.ARRAY_BUFFER, moveSphereMesh.vbo);
+      gl.vertexAttribPointer(oPos,   3, gl.FLOAT, false, STRIDE, 0);
+      gl.vertexAttribPointer(oNorm,  3, gl.FLOAT, false, STRIDE, 12);
+      gl.vertexAttribPointer(oColor, 3, gl.FLOAT, false, STRIDE, 24);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, moveSphereMesh.ibo);
+      gl.uniform3f(oTint, er * fireFlick, eg * fireFlick, eb * fireFlick);
+      gl.drawElements(gl.TRIANGLES, moveSphereMesh.count, idxType, 0);
+      gl.uniform3f(oTint, 1, 1, 1);
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+      gl.enable(gl.CULL_FACE);
+    }
+
+    // ---- Beam cone — visible when tractor / abduct / laser is firing ----
+    if (tractorActive || abductActive || laserActive) {
+      // Origin sits a touch BELOW the saucer hull along the local-down
+      // axis, so the beam emerges from the underside instead of clipping
+      // through the body of the model.
+      const BEAM_HULL_OFFSET = 0.55;
+      const beamSx = ufoPos[0] - upX * BEAM_HULL_OFFSET;
+      const beamSy = ufoPos[1] - upY * BEAM_HULL_OFFSET;
+      const beamSz = ufoPos[2] - upZ * BEAM_HULL_OFFSET;
+      // Aim the cone from the (offset) saucer underside to the cursor
+      // target. Cone's local -Y direction points along (target - origin),
+      // so local Y=-1 lands exactly on the target. Build an orthonormal
+      // basis perpendicular to that axis using the saucer's east as a
+      // reference vector.
       let ax, ay, az;
       if (beamTarget) {
-        ax = ufoPos[0] - beamTarget[0];
-        ay = ufoPos[1] - beamTarget[1];
-        az = ufoPos[2] - beamTarget[2];
+        ax = beamSx - beamTarget[0];
+        ay = beamSy - beamTarget[1];
+        az = beamSz - beamTarget[2];
       } else {
         const len = Math.max(0.5, ufo.alt + 0.4);
         ax = upX * len; ay = upY * len; az = upZ * len;
@@ -6231,12 +6975,12 @@ void main() {
         xx, xy, xz, 0,
         ax, ay, az, 0,
         zx, zy, zz, 0,
-        ufoPos[0], ufoPos[1], ufoPos[2], 1,
+        beamSx, beamSy, beamSz, 1,
       ]);
       gl.uniformMatrix4fv(oModel, false, beamModel);
       gl.disable(gl.CULL_FACE);
 
-      if (tractorActive) {
+      if (tractorActive || abductActive) {
         // Rebuild rings + haze cone for this frame so they animate. Beam
         // length (yLen, computed above) feeds ring thickness so they don't
         // smear when the beam is short.
@@ -6250,17 +6994,18 @@ void main() {
         gl.vertexAttribPointer(oPos,   3, gl.FLOAT, false, STRIDE, 0);
         gl.vertexAttribPointer(oNorm,  3, gl.FLOAT, false, STRIDE, 12);
         gl.vertexAttribPointer(oColor, 3, gl.FLOAT, false, STRIDE, 24);
-        // Additive blend so the rings glow over whatever's beneath. Depth
-        // write off so overlapping rings stack visually instead of fighting.
-        // Slight overall flicker for that energised hum.
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
         gl.depthMask(false);
-        // Pure deep-neon tint — zero red so sun/sky contributions can't
-        // pollute the green into lime. Slight cyan kicker on B for that
-        // "energised plasma" edge.
         const flick = 0.85 + Math.random() * 0.30;
-        gl.uniform3f(oTint, 0.0, 3.2 * flick, 0.7 * flick);
+        // Tractor (rip-the-earth) is now ORANGE; Abduct (gentle, sheep
+        // pickup) keeps the deep neon GREEN that everyone associates
+        // with UFO tractor beams.
+        if (abductActive) {
+          gl.uniform3f(oTint, 0.0, 3.2 * flick, 0.7 * flick);          // green
+        } else {
+          gl.uniform3f(oTint, 3.4 * flick, 1.4 * flick, 0.10 * flick); // orange
+        }
         gl.drawElements(gl.TRIANGLES, beamCounts.iCount, idxType, 0);
         gl.uniform3f(oTint, 1, 1, 1);
         gl.depthMask(true);
@@ -6268,27 +7013,43 @@ void main() {
       }
 
       if (laserActive) {
-        // Additive blend so the bolt glows over whatever's behind it. Slight
-        // size jitter on the core so it feels alive instead of static.
+        // Three additive passes: wide halo (linear glow along path) →
+        // medium glow (warm body) → narrow core (focused line). Drawing
+        // wide-to-narrow ensures the bright core sits on top.
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
         gl.depthMask(false);
         const flicker = 0.85 + Math.random() * 0.30;
-        // Outer glow first (wider, dimmer), core on top (narrow, bright).
+
+        // Halo — soft red bloom around the blade.
+        gl.bindBuffer(gl.ARRAY_BUFFER, laserHalo.vbo);
+        gl.vertexAttribPointer(oPos,   3, gl.FLOAT, false, STRIDE, 0);
+        gl.vertexAttribPointer(oNorm,  3, gl.FLOAT, false, STRIDE, 12);
+        gl.vertexAttribPointer(oColor, 3, gl.FLOAT, false, STRIDE, 24);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, laserHalo.ibo);
+        gl.uniform3f(oTint, 1.8 * flicker, 0.10 * flicker, 0.03 * flicker);
+        gl.drawElements(gl.TRIANGLES, laserHalo.count, idxType, 0);
+
+        // Glow — saturated crimson body. This is the visible BLADE — the
+        // core is just a sliver inside it. Tint cranked so the additive
+        // pass paints solid red, not pink.
         gl.bindBuffer(gl.ARRAY_BUFFER, laserGlow.vbo);
         gl.vertexAttribPointer(oPos,   3, gl.FLOAT, false, STRIDE, 0);
         gl.vertexAttribPointer(oNorm,  3, gl.FLOAT, false, STRIDE, 12);
         gl.vertexAttribPointer(oColor, 3, gl.FLOAT, false, STRIDE, 24);
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, laserGlow.ibo);
-        gl.uniform3f(oTint, 1.4 * flicker, 0.4 * flicker, 0.3 * flicker);
+        gl.uniform3f(oTint, 4.5 * flicker, 0.20 * flicker, 0.05 * flicker);
         gl.drawElements(gl.TRIANGLES, laserGlow.count, idxType, 0);
+
+        // Core — pinprick white-hot line down the middle of the blade.
         gl.bindBuffer(gl.ARRAY_BUFFER, laserCore.vbo);
         gl.vertexAttribPointer(oPos,   3, gl.FLOAT, false, STRIDE, 0);
         gl.vertexAttribPointer(oNorm,  3, gl.FLOAT, false, STRIDE, 12);
         gl.vertexAttribPointer(oColor, 3, gl.FLOAT, false, STRIDE, 24);
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, laserCore.ibo);
-        gl.uniform3f(oTint, 4.0 * flicker, 2.0 * flicker, 1.6 * flicker);
+        gl.uniform3f(oTint, 5.0 * flicker, 4.5 * flicker, 4.0 * flicker);
         gl.drawElements(gl.TRIANGLES, laserCore.count, idxType, 0);
+
         gl.depthMask(true);
         gl.disable(gl.BLEND);
       }
